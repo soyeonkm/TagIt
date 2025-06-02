@@ -63,7 +63,7 @@ export default function ProjectMenu({ onUniversityChange, onTeamChange }: Projec
       <Typography variant="h4" sx={{ color: 'primary.main', mb: 2 }}>
         Select Your Project
       </Typography>
-
+      
       <TextField
         fullWidth
         label="Project Name"
@@ -91,7 +91,7 @@ export default function ProjectMenu({ onUniversityChange, onTeamChange }: Projec
           },
         }}
       />
-      
+
       <FormControl fullWidth>
         <InputLabel id="university-select-label">University</InputLabel>
         <Select
