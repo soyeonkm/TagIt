@@ -1,7 +1,13 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap');
+
 :root {
-  --primary-color: #646cff;
-  --background-color: #242424;
-  --text-color: rgba(255, 255, 255, 0.87);
+  --background-color: #F9FAFB;
+  --text-color: #1F2937;
+  --navbar-color: #FFFFFF;
+  --accent-color: #A3B4DB;
+  --sub-accent-color: #9CA3AF;
+  --hover-color: #D1D5DB;
+  --main-font: 'Plus Jakarta Sans', sans-serif;
 }
 
 * {
@@ -11,29 +17,32 @@
 }
 
 body {
-  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+  font-family: var(--main-font);
   line-height: 1.5;
   font-weight: 400;
   color: var(--text-color);
   background-color: var(--background-color);
+  width: 100%;
+  min-height: 100vh;
 }
 
 .app {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+  width: 100%;
 }
 
 .main-content {
   flex: 1;
   padding: 2rem;
-  max-width: 1200px;
-  margin: 0 auto;
   width: 100%;
+  max-width: none;
+  margin: 0;
 }
 
 a {
-  color: var(--primary-color);
+  color: var(--text-color);
   text-decoration: none;
 }
 
