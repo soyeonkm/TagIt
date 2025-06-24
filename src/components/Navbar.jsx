@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../supabaseClient'
+import { useCallback } from 'react'
 
 function Navbar() {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false)
@@ -11,6 +12,7 @@ function Navbar() {
   const [user, setUser] = useState(null)
   const [showLogoutMsg, setShowLogoutMsg] = useState(false)
   const [logoutMsgOpacity, setLogoutMsgOpacity] = useState(1)
+  const [profile, setProfile] = useState(null)
 
   
   useEffect(() => {
@@ -43,6 +45,20 @@ function Navbar() {
     }
   }, [])
 
+  useEffect(() => {
+    if (user) {
+      // Fetch profile from SQL table
+      supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', user.id)
+        .single()
+        .then(({ data }) => setProfile(data))
+    } else {
+      setProfile(null)
+    }
+  }, [user])
+
   const toggleDropdown = () => {
     setIsDropdownOpen(!isDropdownOpen)
   }
@@ -72,151 +88,103 @@ function Navbar() {
           alignItems: 'center',
           padding: '0 1rem'
         }}>
-          <Link to="/" style={{ 
-            fontSize: '1.5rem', 
-            fontWeight: 'bold',
-            color: 'var(--text-color)',
-            textDecoration: 'none',
-            flexShrink: 0,
-            fontFamily: 'var(--main-font)'
-          }}>
+          <span
+            onClick={() => {
+              if (user) navigate('/projects')
+              else navigate('/')
+            }}
+            style={{ 
+              fontSize: '1.5rem', 
+              fontWeight: 'bold',
+              color: 'var(--text-color)',
+              textDecoration: 'none',
+              flexShrink: 0,
+              fontFamily: 'var(--main-font)',
+              cursor: 'pointer',
+              userSelect: 'none'
+            }}
+          >
             TagIt
-          </Link>
+          </span>
           <div style={{ 
             display: 'flex', 
             gap: '1rem',
             alignItems: 'center',
             flexShrink: 0
           }}>
-            <div style={{ position: 'relative' }} ref={menuRef}>
+            {/* Profile/Login button logic */}
+            {!user ? (
               <button
-                onClick={toggleMenu}
+                onClick={() => navigate('/login')}
                 style={{
-                  width: '40px',
-                  height: '40px',
-                  borderRadius: '50%',
-                  border: 'none',
-                  backgroundColor: 'transparent',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: 'var(--text-color)',
-                  fontSize: '1.5rem'
-                }}
-              >
-                ☰
-              </button>
-              {isMenuOpen && (
-                <div style={{
-                  position: 'absolute',
-                  top: '100%',
-                  right: '0',
-                  marginTop: '0.5rem',
-                  backgroundColor: 'var(--navbar-color)',
-                  border: '1px solid rgba(0, 0, 0, 0.1)',
-                  borderRadius: '8px',
-                  padding: '0.5rem 0',
-                  minWidth: '150px',
-                  zIndex: 1000,
-                  boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)'
-                }}>
-                  <button
-                    onClick={() => {
-                      setIsMenuOpen(false)
-                    }}
-                    style={{
-                      width: '100%',
-                      padding: '0.3rem 0.8rem',
-                      border: 'none',
-                      backgroundColor: 'transparent',
-                      color: 'var(--text-color)',
-                      cursor: 'pointer',
-                      textAlign: 'left',
-                      fontSize: '0.9rem',
-                      fontFamily: 'var(--main-font)'
-                    }}
-                  >
-                    Dashboard
-                  </button>
-                  <button
-                    onClick={() => {
-                      setIsMenuOpen(false)
-                    }}
-                    style={{
-                      width: '100%',
-                      padding: '0.3rem 0.8rem',
-                      border: 'none',
-                      backgroundColor: 'transparent',
-                      color: 'var(--text-color)',
-                      cursor: 'pointer',
-                      textAlign: 'left',
-                      fontSize: '0.9rem',
-                      fontFamily: 'var(--main-font)'
-                    }}
-                  >
-                    Projects
-                  </button>
-                  <button
-                    onClick={() => {
-                      setIsMenuOpen(false)
-                    }}
-                    style={{
-                      width: '100%',
-                      padding: '0.3rem 0.8rem',
-                      border: 'none',
-                      backgroundColor: 'transparent',
-                      color: 'var(--text-color)',
-                      cursor: 'pointer',
-                      textAlign: 'left',
-                      fontSize: '0.9rem',
-                      fontFamily: 'var(--main-font)'
-                    }}
-                  >
-                    Settings
-                  </button>
-                </div>
-              )}
-            </div>
-            <div style={{ position: 'relative' }} ref={dropdownRef}>
-              <button
-                onClick={toggleDropdown}
-                style={{
-                  width: '40px',
-                  height: '40px',
-                  borderRadius: '50%',
+                  padding: '0.5rem 1.2rem',
+                  borderRadius: '5px',
                   border: 'none',
                   backgroundColor: 'var(--accent-color)',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
                   color: 'white',
-                  fontSize: '1.2rem',
-                  fontWeight: 'bold'
+                  fontWeight: 'bold',
+                  fontSize: '1rem',
+                  cursor: 'pointer',
+                  fontFamily: 'var(--main-font)'
                 }}
               >
-                S
+                Login
               </button>
-              {isDropdownOpen && (
-                <div style={{
-                  position: 'absolute',
-                  top: '100%',
-                  right: '0',
-                  marginTop: '0.5rem',
-                  backgroundColor: 'var(--navbar-color)',
-                  border: '1px solid rgba(0, 0, 0, 0.1)',
-                  borderRadius: '8px',
-                  padding: '0.5rem 0',
-                  minWidth: '150px',
-                  zIndex: 1000,
-                  boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)'
-                }}>
-                  {!user ? (
+            ) : (
+              <div style={{ position: 'relative' }} ref={dropdownRef}>
+                <button
+                  onClick={toggleDropdown}
+                  style={{
+                    width: '40px',
+                    height: '40px',
+                    borderRadius: '50%',
+                    border: 'none',
+                    backgroundColor: profile && !user.user_metadata?.avatar_url
+                      ? (profile.profile_color || 'var(--accent-color)')
+                      : 'var(--accent-color)',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: 'white',
+                    fontSize: '1.2rem',
+                    fontWeight: 'bold',
+                    overflow: 'hidden',
+                    padding: 0
+                  }}
+                >
+                  {user.user_metadata && user.user_metadata.avatar_url ? (
+                    <img
+                      src={user.user_metadata.avatar_url}
+                      alt="Profile"
+                      style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%' }}
+                    />
+                  ) : profile && profile.first_name ? (
+                    profile.first_name.charAt(0).toUpperCase()
+                  ) : user.email ? (
+                    user.email.charAt(0).toUpperCase()
+                  ) : (
+                    <span>U</span>
+                  )}
+                </button>
+                {isDropdownOpen && (
+                  <div style={{
+                    position: 'absolute',
+                    top: '100%',
+                    right: '0',
+                    marginTop: '0.5rem',
+                    backgroundColor: 'var(--navbar-color)',
+                    border: '1px solid rgba(0, 0, 0, 0.1)',
+                    borderRadius: '8px',
+                    padding: '0.5rem 0',
+                    minWidth: '150px',
+                    zIndex: 1000,
+                    boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)'
+                  }}>
                     <button
                       onClick={() => {
                         setIsDropdownOpen(false)
-                        navigate('/login')
+                        navigate('/profile')
                       }}
                       style={{
                         width: '100%',
@@ -230,9 +198,8 @@ function Navbar() {
                         fontFamily: 'var(--main-font)'
                       }}
                     >
-                      Log In
+                      Profile
                     </button>
-                  ) : (
                     <button
                       onClick={async () => {
                         await supabase.auth.signOut()
@@ -260,10 +227,10 @@ function Navbar() {
                     >
                       Log Out
                     </button>
-                  )}
-                </div>
-              )}
-            </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </nav>

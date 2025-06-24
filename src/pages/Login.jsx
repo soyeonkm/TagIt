@@ -9,6 +9,8 @@ function Login() {
   const [isReset, setIsReset] = useState(false)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
+  const [firstName, setFirstName] = useState('')
+  const [lastName, setLastName] = useState('')
   const navigate = useNavigate()
 
   const handleAuth = async (e) => {
@@ -16,9 +18,35 @@ function Login() {
     setError('')
     setMessage('')
     if (isSignUp) {
-      const { error } = await supabase.auth.signUp({ email, password })
+      // Pick a random color from the allowed CSS variable list
+      const cssVars = [
+        'var(--accent-color)',
+        'var(--sub-accent-color)',
+        'var(--hover-color)',
+        'var(--navbar-color)',
+        'var(--background-color)'
+      ];
+      const profileColor = cssVars[Math.floor(Math.random() * cssVars.length)]
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password
+      })
       if (error) setError(error.message)
-      else setMessage('Check your email for a confirmation link!')
+      else {
+        // Insert profile into SQL table
+        const userId = data.user?.id
+        if (userId) {
+          await supabase.from('profiles').insert([
+            {
+              id: userId,
+              first_name: firstName,
+              last_name: lastName,
+              profile_color: profileColor
+            }
+          ])
+        }
+        setMessage('Check your email for a confirmation link!')
+      }
     } else {
       const { error } = await supabase.auth.signInWithPassword({ email, password })
       if (error) setError(error.message)
@@ -44,6 +72,26 @@ function Login() {
         {isReset ? 'Reset Password' : isSignUp ? 'Create Account' : 'Log In'}
       </h2>
       <form onSubmit={isReset ? handleReset : handleAuth}>
+        {isSignUp && (
+          <>
+            <input
+              type="text"
+              placeholder="First Name"
+              value={firstName}
+              onChange={e => setFirstName(e.target.value)}
+              required
+              style={{ width: '100%', marginBottom: 12, padding: 8, fontSize: 16 }}
+            />
+            <input
+              type="text"
+              placeholder="Last Name"
+              value={lastName}
+              onChange={e => setLastName(e.target.value)}
+              required
+              style={{ width: '100%', marginBottom: 12, padding: 8, fontSize: 16 }}
+            />
+          </>
+        )}
         <input
           type="email"
           placeholder="Email"
