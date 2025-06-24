@@ -1,14 +1,16 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 
-function Projects() {
+function Dashboard() {
   const [addHover, setAddHover] = useState(false)
+  const navigate = useNavigate()
 
   const handleAddProject = () => {
     // Handle adding new project
     console.log('Add new project clicked')
   }
   const handleProjectClick = (index) => {
-    alert(`Clicked Project ${index + 1}`)
+    navigate('/project')
   }
 
   return (
@@ -22,7 +24,7 @@ function Projects() {
         color: 'var(--text-color)',
         textAlign: 'center'
       }}>
-        Projects
+        Dashboard
       </h1>
       
       <div style={{
@@ -161,4 +163,4 @@ function Projects() {
   )
 }
 
-export default Projects 
+export default Dashboard 

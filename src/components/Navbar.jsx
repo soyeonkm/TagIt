@@ -63,10 +63,6 @@ function Navbar() {
     setIsDropdownOpen(!isDropdownOpen)
   }
 
-  const toggleMenu = () => {
-    setIsMenuOpen(!isMenuOpen)
-  }
-
   return (
     <>
       <nav style={{
@@ -90,7 +86,7 @@ function Navbar() {
         }}>
           <span
             onClick={() => {
-              if (user) navigate('/projects')
+              if (user) navigate('/dashboard')
               else navigate('/')
             }}
             style={{ 
@@ -139,8 +135,8 @@ function Navbar() {
                     height: '40px',
                     borderRadius: '50%',
                     border: 'none',
-                    backgroundColor: profile && !user.user_metadata?.avatar_url
-                      ? (profile.profile_color || 'var(--accent-color)')
+                    backgroundColor: !user.user_metadata?.avatar_url
+                      ? 'var(--sub-accent-color)'
                       : 'var(--accent-color)',
                     cursor: 'pointer',
                     display: 'flex',
@@ -253,7 +249,7 @@ function Navbar() {
               background: 'none',
               textAlign: 'center',
               fontWeight: 200,
-              fontSize: 20,
+              fontSize: 16,
               opacity: logoutMsgOpacity,
               transition: 'opacity 0.6s',
               marginTop: 0,
@@ -261,7 +257,7 @@ function Navbar() {
               boxShadow: 'none',
             }}
           >
-            You&apos;re logged out
+            Successfully logged out!
           </div>
         </div>
       )}

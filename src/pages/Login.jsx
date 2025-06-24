@@ -1,39 +1,40 @@
+// Import required hooks and modules
 import { useState } from 'react'
-import { supabase } from '../supabaseClient'
-import { useNavigate } from 'react-router-dom'
+import { supabase } from '../supabaseClient' // Supabase client for auth & database
+import { useNavigate } from 'react-router-dom' // Hook to navigate between routes
 
 function Login() {
+  // State variables for form fields and UI states
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [isSignUp, setIsSignUp] = useState(false)
-  const [isReset, setIsReset] = useState(false)
-  const [error, setError] = useState('')
-  const [message, setMessage] = useState('')
-  const [firstName, setFirstName] = useState('')
-  const [lastName, setLastName] = useState('')
-  const navigate = useNavigate()
+  const [isSignUp, setIsSignUp] = useState(false) // Toggle between login and signup
+  const [isReset, setIsReset] = useState(false)   // Toggle for password reset view
+  const [error, setError] = useState('')          // Error message state
+  const [message, setMessage] = useState('')      // Success or status message
+  const [firstName, setFirstName] = useState('')  // First name for signup
+  const [lastName, setLastName] = useState('')    // Last name for signup
+  const navigate = useNavigate()                  // Router navigation hook
 
+  // Handle login or signup form submission
   const handleAuth = async (e) => {
     e.preventDefault()
     setError('')
     setMessage('')
+
     if (isSignUp) {
-      // Pick a random color from the allowed CSS variable list
-      const cssVars = [
-        'var(--accent-color)',
-        'var(--sub-accent-color)',
-        'var(--hover-color)',
-        'var(--navbar-color)',
-        'var(--background-color)'
-      ];
-      const profileColor = cssVars[Math.floor(Math.random() * cssVars.length)]
+      // Always use sub-accent-color for profile color
+      const profileColor = 'var(--sub-accent-color)'
+
+      // Call Supabase signUp method
       const { data, error } = await supabase.auth.signUp({
         email,
         password
       })
-      if (error) setError(error.message)
-      else {
-        // Insert profile into SQL table
+
+      if (error) {
+        setError(error.message)
+      } else {
+        // If signup is successful, insert user profile into the 'profiles' table
         const userId = data.user?.id
         if (userId) {
           await supabase.from('profiles').insert([
@@ -48,31 +49,54 @@ function Login() {
         setMessage('Check your email for a confirmation link!')
       }
     } else {
+      // Handle user login
       const { error } = await supabase.auth.signInWithPassword({ email, password })
-      if (error) setError(error.message)
-      else {
+      if (error) {
+        setError(error.message)
+      } else {
         setMessage('Logged in successfully!')
-        navigate('/projects') // redirect to projects page when logged in
+        navigate('/dashboard') // redirect to dashboard page when logged in
       }
     }
   }
 
+  // Handle password reset request
   const handleReset = async (e) => {
     e.preventDefault()
     setError('')
     setMessage('')
+
     const { error } = await supabase.auth.resetPasswordForEmail(email)
-    if (error) setError(error.message)
-    else setMessage('Check your email for a password reset link!')
+    if (error) {
+      setError(error.message)
+    } else {
+      setMessage('Check your email for a password reset link!')
+    }
   }
 
+  // Render form UI
   return (
-    <div style={{ minHeight: '70vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <div style={{ maxWidth: 400, width: '100%', padding: 32, background: '#fff', borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}>
+    <div style={{
+      minHeight: '70vh',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center'
+    }}>
+      <div style={{
+        maxWidth: 400,
+        width: '100%',
+        padding: 32,
+        background: '#fff',
+        borderRadius: 8,
+        boxShadow: '0 2px 8px rgba(0,0,0,0.08)'
+      }}>
         <h2 style={{ textAlign: 'center', marginBottom: 24 }}>
+          {/* Dynamic form title based on mode */}
           {isReset ? 'Reset Password' : isSignUp ? 'Create Account' : 'Log In'}
         </h2>
+
         <form onSubmit={isReset ? handleReset : handleAuth}>
+          {/* Show first/last name fields only in signup mode */}
           {isSignUp && (
             <>
               <input
@@ -93,6 +117,8 @@ function Login() {
               />
             </>
           )}
+
+          {/* Email input field */}
           <input
             type="email"
             placeholder="Email"
@@ -101,6 +127,8 @@ function Login() {
             required
             style={{ width: '100%', marginBottom: 12, padding: 8, fontSize: 16 }}
           />
+
+          {/* Password input field, hidden in reset mode */}
           {!isReset && (
             <input
               type="password"
@@ -111,13 +139,36 @@ function Login() {
               style={{ width: '100%', marginBottom: 12, padding: 8, fontSize: 16 }}
             />
           )}
+
+          {/* Error or status messages */}
           {error && <div style={{ color: 'red', marginBottom: 12 }}>{error}</div>}
           {message && <div style={{ color: 'green', marginBottom: 12 }}>{message}</div>}
-          <button type="submit" style={{ width: '100%', padding: 10, fontSize: 16, background: 'var(--accent-color)', color: '#fff', border: 'none', borderRadius: 4, marginBottom: 12 }}>
+
+          {/* Submit button */}
+          <button
+            type="submit"
+            style={{
+              width: '100%',
+              padding: 10,
+              fontSize: 16,
+              background: 'var(--accent-color)',
+              color: '#fff',
+              border: 'none',
+              borderRadius: 4,
+              marginBottom: 12
+            }}>
             {isReset ? 'Send Reset Link' : isSignUp ? 'Sign Up' : 'Log In'}
           </button>
         </form>
-        <div style={{ textAlign: 'center', marginTop: 0, display: 'flex', justifyContent: 'center', gap: 12 }}>
+
+        {/* Buttons to toggle between login/signup/reset */}
+        <div style={{
+          textAlign: 'center',
+          marginTop: 0,
+          display: 'flex',
+          justifyContent: 'center',
+          gap: 12
+        }}>
           <div style={{ display: 'flex', width: '100%', gap: 8 }}>
             {!isReset && (
               <button
@@ -134,11 +185,17 @@ function Login() {
                   flex: 1
                 }}
               >
+                {/* Toggle login/signup text */}
                 {isSignUp ? 'Already have an account? Log In' : 'Need an account? Sign Up'}
               </button>
             )}
             <button
-              onClick={() => { setIsReset(!isReset); setIsSignUp(false); setMessage(''); setError('') }}
+              onClick={() => {
+                setIsReset(!isReset)
+                setIsSignUp(false)
+                setMessage('')
+                setError('')
+              }}
               style={{
                 background: 'var(--accent-color)',
                 border: 'none',
@@ -151,6 +208,7 @@ function Login() {
                 flex: 1
               }}
             >
+              {/* Toggle reset password view */}
               {isReset ? 'Back to Login' : 'Forgot password?'}
             </button>
           </div>
