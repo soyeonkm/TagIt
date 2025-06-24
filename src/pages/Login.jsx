@@ -67,70 +67,94 @@ function Login() {
   }
 
   return (
-    <div style={{ maxWidth: 400, margin: '4rem auto', padding: 32, background: '#fff', borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}>
-      <h2 style={{ textAlign: 'center', marginBottom: 24 }}>
-        {isReset ? 'Reset Password' : isSignUp ? 'Create Account' : 'Log In'}
-      </h2>
-      <form onSubmit={isReset ? handleReset : handleAuth}>
-        {isSignUp && (
-          <>
-            <input
-              type="text"
-              placeholder="First Name"
-              value={firstName}
-              onChange={e => setFirstName(e.target.value)}
-              required
-              style={{ width: '100%', marginBottom: 12, padding: 8, fontSize: 16 }}
-            />
-            <input
-              type="text"
-              placeholder="Last Name"
-              value={lastName}
-              onChange={e => setLastName(e.target.value)}
-              required
-              style={{ width: '100%', marginBottom: 12, padding: 8, fontSize: 16 }}
-            />
-          </>
-        )}
-        <input
-          type="email"
-          placeholder="Email"
-          value={email}
-          onChange={e => setEmail(e.target.value)}
-          required
-          style={{ width: '100%', marginBottom: 12, padding: 8, fontSize: 16 }}
-        />
-        {!isReset && (
+    <div style={{ minHeight: '70vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div style={{ maxWidth: 400, width: '100%', padding: 32, background: '#fff', borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}>
+        <h2 style={{ textAlign: 'center', marginBottom: 24 }}>
+          {isReset ? 'Reset Password' : isSignUp ? 'Create Account' : 'Log In'}
+        </h2>
+        <form onSubmit={isReset ? handleReset : handleAuth}>
+          {isSignUp && (
+            <>
+              <input
+                type="text"
+                placeholder="First Name"
+                value={firstName}
+                onChange={e => setFirstName(e.target.value)}
+                required
+                style={{ width: '100%', marginBottom: 12, padding: 8, fontSize: 16 }}
+              />
+              <input
+                type="text"
+                placeholder="Last Name"
+                value={lastName}
+                onChange={e => setLastName(e.target.value)}
+                required
+                style={{ width: '100%', marginBottom: 12, padding: 8, fontSize: 16 }}
+              />
+            </>
+          )}
           <input
-            type="password"
-            placeholder="Password"
-            value={password}
-            onChange={e => setPassword(e.target.value)}
+            type="email"
+            placeholder="Email"
+            value={email}
+            onChange={e => setEmail(e.target.value)}
             required
             style={{ width: '100%', marginBottom: 12, padding: 8, fontSize: 16 }}
           />
-        )}
-        {error && <div style={{ color: 'red', marginBottom: 12 }}>{error}</div>}
-        {message && <div style={{ color: 'green', marginBottom: 12 }}>{message}</div>}
-        <button type="submit" style={{ width: '100%', padding: 10, fontSize: 16, background: 'var(--accent-color)', color: '#fff', border: 'none', borderRadius: 4 }}>
-          {isReset ? 'Send Reset Link' : isSignUp ? 'Sign Up' : 'Log In'}
-        </button>
-      </form>
-      <div style={{ textAlign: 'center', marginTop: 16 }}>
-        {!isReset && (
-          <button
-            onClick={() => setIsSignUp(!isSignUp)}
-            style={{ background: 'none', border: 'none', color: 'var(--accent-color)', cursor: 'pointer', textDecoration: 'underline', marginRight: 12 }}
-          >
-            {isSignUp ? 'Already have an account? Log In' : 'Need an account? Sign Up'}
+          {!isReset && (
+            <input
+              type="password"
+              placeholder="Password"
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              required
+              style={{ width: '100%', marginBottom: 12, padding: 8, fontSize: 16 }}
+            />
+          )}
+          {error && <div style={{ color: 'red', marginBottom: 12 }}>{error}</div>}
+          {message && <div style={{ color: 'green', marginBottom: 12 }}>{message}</div>}
+          <button type="submit" style={{ width: '100%', padding: 10, fontSize: 16, background: 'var(--accent-color)', color: '#fff', border: 'none', borderRadius: 4, marginBottom: 12 }}>
+            {isReset ? 'Send Reset Link' : isSignUp ? 'Sign Up' : 'Log In'}
           </button>
-        )}
-        <button
-          onClick={() => { setIsReset(!isReset); setIsSignUp(false); setMessage(''); setError('') }}
-          style={{ background: 'none', border: 'none', color: 'var(--accent-color)', cursor: 'pointer', textDecoration: 'underline' }}
-        >
-          {isReset ? 'Back to Login' : 'Forgot password?'}
-        </button>
+        </form>
+        <div style={{ textAlign: 'center', marginTop: 0, display: 'flex', justifyContent: 'center', gap: 12 }}>
+          <div style={{ display: 'flex', width: '100%', gap: 8 }}>
+            {!isReset && (
+              <button
+                onClick={() => setIsSignUp(!isSignUp)}
+                style={{
+                  background: 'var(--accent-color)',
+                  border: 'none',
+                  color: '#fff',
+                  cursor: 'pointer',
+                  borderRadius: 4,
+                  fontSize: 12,
+                  padding: '10px 0',
+                  fontFamily: 'var(--main-font)',
+                  flex: 1
+                }}
+              >
+                {isSignUp ? 'Already have an account? Log In' : 'Need an account? Sign Up'}
+              </button>
+            )}
+            <button
+              onClick={() => { setIsReset(!isReset); setIsSignUp(false); setMessage(''); setError('') }}
+              style={{
+                background: 'var(--accent-color)',
+                border: 'none',
+                color: '#fff',
+                cursor: 'pointer',
+                borderRadius: 4,
+                fontSize: 12,
+                padding: '10px 0',
+                fontFamily: 'var(--main-font)',
+                flex: 1
+              }}
+            >
+              {isReset ? 'Back to Login' : 'Forgot password?'}
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   )

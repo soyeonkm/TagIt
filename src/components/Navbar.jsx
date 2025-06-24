@@ -218,7 +218,7 @@ function Navbar() {
                         padding: '0.3rem 0.8rem',
                         border: 'none',
                         backgroundColor: 'transparent',
-                        color: 'var(--text-color)',
+                        color: 'red',
                         cursor: 'pointer',
                         textAlign: 'left',
                         fontSize: '0.9rem',
