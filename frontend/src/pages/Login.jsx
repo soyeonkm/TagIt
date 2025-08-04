@@ -8,7 +8,6 @@ function Login() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [isSignUp, setIsSignUp] = useState(false) // Toggle between login and signup
-  const [isReset, setIsReset] = useState(false)   // Toggle for password reset view
   const [error, setError] = useState('')          // Error message state
   const [message, setMessage] = useState('')      // Success or status message
   const [firstName, setFirstName] = useState('')  // First name for signup
@@ -66,7 +65,15 @@ function Login() {
     setError('')
     setMessage('')
 
-    const { error } = await supabase.auth.resetPasswordForEmail(email)
+    console.log('Requesting password reset for email:', email)
+    console.log('Redirect URL:', `${window.location.origin}/reset-password`)
+
+    const { data, error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/reset-password`
+    })
+    
+    console.log('Reset password response:', { data, error })
+    
     if (error) {
       setError(error.message)
     } else {
@@ -92,10 +99,10 @@ function Login() {
       }}>
         <h2 style={{ textAlign: 'center', marginBottom: 24 }}>
           {/* Dynamic form title based on mode */}
-          {isReset ? 'Reset Password' : isSignUp ? 'Create Account' : 'Log In'}
+          {isSignUp ? 'Create Account' : 'Log In'}
         </h2>
 
-        <form onSubmit={isReset ? handleReset : handleAuth}>
+        <form onSubmit={handleAuth}>
           {/* Show first/last name fields only in signup mode */}
           {isSignUp && (
             <>
@@ -128,17 +135,15 @@ function Login() {
             style={{ width: '100%', marginBottom: 12, padding: 8, fontSize: 16 }}
           />
 
-          {/* Password input field, hidden in reset mode */}
-          {!isReset && (
-            <input
-              type="password"
-              placeholder="Password"
-              value={password}
-              onChange={e => setPassword(e.target.value)}
-              required
-              style={{ width: '100%', marginBottom: 12, padding: 8, fontSize: 16 }}
-            />
-          )}
+          {/* Password input field */}
+          <input
+            type="password"
+            placeholder="Password"
+            value={password}
+            onChange={e => setPassword(e.target.value)}
+            required
+            style={{ width: '100%', marginBottom: 12, padding: 8, fontSize: 16 }}
+          />
 
           {/* Error or status messages */}
           {error && <div style={{ color: 'red', marginBottom: 12 }}>{error}</div>}
@@ -157,11 +162,11 @@ function Login() {
               borderRadius: 4,
               marginBottom: 12
             }}>
-            {isReset ? 'Send Reset Link' : isSignUp ? 'Sign Up' : 'Log In'}
+            {isSignUp ? 'Sign Up' : 'Log In'}
           </button>
         </form>
 
-        {/* Buttons to toggle between login/signup/reset */}
+        {/* Buttons to toggle between login/signup and forgot password */}
         <div style={{
           textAlign: 'center',
           marginTop: 0,
@@ -170,32 +175,8 @@ function Login() {
           gap: 12
         }}>
           <div style={{ display: 'flex', width: '100%', gap: 8 }}>
-            {!isReset && (
-              <button
-                onClick={() => setIsSignUp(!isSignUp)}
-                style={{
-                  background: 'var(--accent-color)',
-                  border: 'none',
-                  color: '#fff',
-                  cursor: 'pointer',
-                  borderRadius: 4,
-                  fontSize: 12,
-                  padding: '10px 0',
-                  fontFamily: 'var(--main-font)',
-                  flex: 1
-                }}
-              >
-                {/* Toggle login/signup text */}
-                {isSignUp ? 'Already have an account? Log In' : 'Need an account? Sign Up'}
-              </button>
-            )}
             <button
-              onClick={() => {
-                setIsReset(!isReset)
-                setIsSignUp(false)
-                setMessage('')
-                setError('')
-              }}
+              onClick={() => setIsSignUp(!isSignUp)}
               style={{
                 background: 'var(--accent-color)',
                 border: 'none',
@@ -208,8 +189,24 @@ function Login() {
                 flex: 1
               }}
             >
-              {/* Toggle reset password view */}
-              {isReset ? 'Back to Login' : 'Forgot password?'}
+              {/* Toggle login/signup text */}
+              {isSignUp ? 'Already have an account? Log In' : 'Need an account? Sign Up'}
+            </button>
+            <button
+              onClick={handleReset}
+              style={{
+                background: 'var(--accent-color)',
+                border: 'none',
+                color: '#fff',
+                cursor: 'pointer',
+                borderRadius: 4,
+                fontSize: 12,
+                padding: '10px 0',
+                fontFamily: 'var(--main-font)',
+                flex: 1
+              }}
+            >
+              Forgot password?
             </button>
           </div>
         </div>

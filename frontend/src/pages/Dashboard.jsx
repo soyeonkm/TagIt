@@ -1,16 +1,100 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { supabase } from '../supabaseClient'
 
 function Dashboard() {
   const [addHover, setAddHover] = useState(false)
+  const [projects, setProjects] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
   const navigate = useNavigate()
 
-  const handleAddProject = () => {
-    // Handle adding new project
-    console.log('Add new project clicked')
+  // Fetch projects on component mount
+  useEffect(() => {
+    fetchProjects()
+  }, [])
+
+  const fetchProjects = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) {
+        setError('User not authenticated')
+        setLoading(false)
+        return
+      }
+
+      const { data, error } = await supabase
+        .from('projects')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+
+      if (error) {
+        console.error('Error fetching projects:', error)
+        setError('Failed to load projects')
+      } else {
+        setProjects(data || [])
+      }
+    } catch (error) {
+      console.error('Error:', error)
+      setError('Failed to load projects')
+    } finally {
+      setLoading(false)
+    }
   }
-  const handleProjectClick = (index) => {
-    navigate('/project')
+
+  const handleAddProject = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) {
+        setError('User not authenticated')
+        return
+      }
+
+      // Create new project
+      const { data, error } = await supabase
+        .from('projects')
+        .insert([
+          {
+            user_id: user.id,
+            name: `Project ${projects.length + 1}`,
+            description: 'New project',
+            image_url: 'https://img.freepik.com/premium-vector/photographer-with-camera-flat-vector-illustration_648489-88.jpg'
+          }
+        ])
+        .select()
+
+      if (error) {
+        console.error('Error creating project:', error)
+        setError('Failed to create project')
+      } else {
+        // Refresh projects list
+        await fetchProjects()
+        // Navigate to the new project
+        if (data && data[0]) {
+          navigate(`/project/${data[0].id}`)
+        }
+      }
+    } catch (error) {
+      console.error('Error:', error)
+      setError('Failed to create project')
+    }
+  }
+
+  const handleProjectClick = (projectId) => {
+    navigate(`/project/${projectId}`)
+  }
+
+  if (loading) {
+    return (
+      <div style={{ 
+        padding: '2rem',
+        fontFamily: 'var(--main-font)',
+        textAlign: 'center'
+      }}>
+        <div>Loading projects...</div>
+      </div>
+    )
   }
 
   return (
@@ -26,10 +110,23 @@ function Dashboard() {
       }}>
         Dashboard
       </h1>
+
+      {error && (
+        <div style={{
+          color: 'red',
+          textAlign: 'center',
+          marginBottom: '1rem',
+          padding: '0.5rem',
+          backgroundColor: '#ffebee',
+          borderRadius: '4px'
+        }}>
+          {error}
+        </div>
+      )}
       
       <div style={{
         display: 'grid',
-        gridTemplateColumns: 'repeat(5, 1fr)',
+        gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
         gap: '1.5rem',
         maxWidth: '100%'
       }}>
@@ -90,10 +187,10 @@ function Dashboard() {
         </button>
 
         {/* Project Tiles */}
-        {Array.from({ length: 1 }, (_, index) => (
+        {projects.map((project) => (
           <button
-            key={index}
-            onClick={() => handleProjectClick(index)}
+            key={project.id}
+            onClick={() => handleProjectClick(project.id)}
             style={{
               width: '100%',
               aspectRatio: '1',
@@ -128,8 +225,8 @@ function Dashboard() {
             onMouseOut ={e => e.currentTarget.style.opacity = '100%'}
             >
               <img
-                src={'https://img.freepik.com/premium-vector/photographer-with-camera-flat-vector-illustration_648489-88.jpg'}
-                alt={`Project ${index + 1}`}
+                src={project.image_url || 'https://img.freepik.com/premium-vector/photographer-with-camera-flat-vector-illustration_648489-88.jpg'}
+                alt={project.name}
                 style={{
                   width: '100%',
                   height: '100%',
@@ -154,7 +251,7 @@ function Dashboard() {
               color: 'white',
               fontFamily: 'var(--main-font)'
             }}>
-              Project {index + 1}
+              {project.name}
             </div>
           </button>
         ))}

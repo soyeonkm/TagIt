@@ -5,6 +5,7 @@ import Navbar from './components/Navbar'
 import Login from './pages/Login'
 import Profile from './pages/Profile'
 import Project from './pages/Project'
+import ResetPassword from './pages/ResetPassword'
 
 function App() {
   return (
@@ -14,9 +15,11 @@ function App() {
         <Routes>
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/project" element={<Project />} />
+          <Route path="/project/:id" element={<Project />} />
           <Route path="/" element={<Home />} />
           <Route path="/login" element={<Login />} />
           <Route path="/profile" element={<Profile />} />
+          <Route path="/reset-password" element={<ResetPassword />} />
         </Routes>
       </main>
     </div>
