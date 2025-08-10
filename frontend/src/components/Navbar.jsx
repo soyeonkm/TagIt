@@ -54,40 +54,15 @@ function Navbar() {
 
   return (
     <>
-      <nav style={{
-        padding: '0.5rem 0',
-        backgroundColor: 'var(--navbar-color)',
-        borderBottom: '1px solid rgba(0, 0, 0, 0.1)',
-        boxShadow: '0 1px 3px rgba(0, 0, 0, 0.1)',
-        width: '100%',
-        position: 'sticky',
-        top: 0,
-        zIndex: 1000
-      }}>
-        <div style={{
-          width: '100%',
-          maxWidth: '100%',
-          margin: '0',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          padding: '0 1rem'
-        }}>
+      <nav className="navbar">
+        <div className="navbar-content">
           <span
             onClick={() => {
               if (user) navigate('/dashboard')
               else navigate('/')
             }}
-            style={{ 
-              fontSize: '1.5rem', 
-              fontWeight: 'bold',
-              color: 'var(--text-color)',
-              textDecoration: 'none',
-              flexShrink: 0,
-              fontFamily: 'var(--main-font)',
-              cursor: 'pointer',
-              userSelect: 'none'
-            }}
+            className="navbar-brand"
+            style={{ cursor: 'pointer', userSelect: 'none' }}
           >
             TagIt
           </span>
@@ -101,17 +76,7 @@ function Navbar() {
             {!user ? (
               <button
                 onClick={() => navigate('/login')}
-                style={{
-                  padding: '0.5rem 1.2rem',
-                  borderRadius: '5px',
-                  border: 'none',
-                  backgroundColor: 'var(--accent-color)',
-                  color: 'white',
-                  fontWeight: 'bold',
-                  fontSize: '1rem',
-                  cursor: 'pointer',
-                  fontFamily: 'var(--main-font)'
-                }}
+                className="btn btn-primary"
               >
                 Login
               </button>
@@ -120,8 +85,8 @@ function Navbar() {
                 <button
                   onClick={toggleDropdown}
                   style={{
-                    width: '40px',
-                    height: '40px',
+                    width: '44px',
+                    height: '44px',
                     borderRadius: '50%',
                     border: 'none',
                     backgroundColor: !user.user_metadata?.avatar_url
@@ -135,7 +100,17 @@ function Navbar() {
                     fontSize: '1.2rem',
                     fontWeight: 'bold',
                     overflow: 'hidden',
-                    padding: 0
+                    padding: 0,
+                    transition: 'var(--transition)',
+                    boxShadow: 'var(--shadow-sm)'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.target.style.transform = 'scale(1.05)'
+                    e.target.style.boxShadow = 'var(--shadow-md)'
+                  }}
+                  onMouseLeave={(e) => {
+                    e.target.style.transform = 'scale(1)'
+                    e.target.style.boxShadow = 'var(--shadow-sm)'
                   }}
                 >
                   {user.user_metadata && user.user_metadata.avatar_url ? (
@@ -157,14 +132,15 @@ function Navbar() {
                     position: 'absolute',
                     top: '100%',
                     right: '0',
-                    marginTop: '0.5rem',
+                    marginTop: '0.75rem',
                     backgroundColor: 'var(--navbar-color)',
-                    border: '1px solid rgba(0, 0, 0, 0.1)',
-                    borderRadius: '8px',
+                    border: '1px solid rgba(0, 0, 0, 0.08)',
+                    borderRadius: 'var(--border-radius)',
                     padding: '0.5rem 0',
-                    minWidth: '150px',
+                    minWidth: '180px',
                     zIndex: 1000,
-                    boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)'
+                    boxShadow: 'var(--shadow-lg)',
+                    animation: 'fadeIn 0.2s ease-out'
                   }}>
                     <button
                       onClick={() => {
@@ -173,16 +149,27 @@ function Navbar() {
                       }}
                       style={{
                         width: '100%',
-                        padding: '0.3rem 0.8rem',
+                        padding: '0.75rem 1rem',
                         border: 'none',
                         backgroundColor: 'transparent',
                         color: 'var(--text-color)',
                         cursor: 'pointer',
                         textAlign: 'left',
                         fontSize: '0.9rem',
-                        fontFamily: 'var(--main-font)'
+                        fontFamily: 'var(--main-font)',
+                        transition: 'var(--transition)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.5rem'
+                      }}
+                      onMouseEnter={(e) => {
+                        e.target.style.backgroundColor = 'var(--hover-color)'
+                      }}
+                      onMouseLeave={(e) => {
+                        e.target.style.backgroundColor = 'transparent'
                       }}
                     >
+                      <span>👤</span>
                       Profile
                     </button>
                     <button
@@ -200,16 +187,27 @@ function Navbar() {
                       }}
                       style={{
                         width: '100%',
-                        padding: '0.3rem 0.8rem',
+                        padding: '0.75rem 1rem',
                         border: 'none',
                         backgroundColor: 'transparent',
-                        color: 'red',
+                        color: '#dc2626',
                         cursor: 'pointer',
                         textAlign: 'left',
                         fontSize: '0.9rem',
-                        fontFamily: 'var(--main-font)'
+                        fontFamily: 'var(--main-font)',
+                        transition: 'var(--transition)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.5rem'
+                      }}
+                      onMouseEnter={(e) => {
+                        e.target.style.backgroundColor = '#fef2f2'
+                      }}
+                      onMouseLeave={(e) => {
+                        e.target.style.backgroundColor = 'transparent'
                       }}
                     >
+                      <span>🚪</span>
                       Log Out
                     </button>
                   </div>
@@ -223,7 +221,7 @@ function Navbar() {
         <div
           style={{
             position: 'fixed',
-            top: '64px', // adjust if your navbar height is different
+            top: '80px',
             left: 0,
             width: '100%',
             display: 'flex',
@@ -235,15 +233,18 @@ function Navbar() {
           <div
             style={{
               color: 'var(--text-color)',
-              background: 'none',
+              background: 'var(--navbar-color)',
               textAlign: 'center',
-              fontWeight: 200,
-              fontSize: 16,
+              fontWeight: 500,
+              fontSize: '0.875rem',
               opacity: logoutMsgOpacity,
               transition: 'opacity 0.6s',
               marginTop: 0,
               pointerEvents: 'auto',
-              boxShadow: 'none',
+              boxShadow: 'var(--shadow-md)',
+              padding: '0.75rem 1.5rem',
+              borderRadius: 'var(--border-radius)',
+              border: '1px solid rgba(0, 0, 0, 0.08)'
             }}
           >
             Successfully logged out!

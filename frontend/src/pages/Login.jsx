@@ -26,24 +26,19 @@ function Login() {
       // Always use sub-accent-color for profile color
       const profileColor = 'var(--sub-accent-color)'
 
-      // Call Tauri backend signUp method
-      const { data, error } = await signUp(email, password)
+      // Prepare profile data
+      const profileData = {
+        first_name: firstName,
+        last_name: lastName,
+        profile_color: profileColor
+      }
+
+      // Call Tauri backend signUp method with profile data
+      const { data, error } = await signUp(email, password, profileData)
 
       if (error) {
         setError(error.message)
       } else {
-        // If signup is successful, insert user profile into the 'profiles' table
-        const userId = data.user?.id
-        if (userId) {
-          await tauriSupabase.from('profiles').insert([
-            {
-              id: userId,
-              first_name: firstName,
-              last_name: lastName,
-              profile_color: profileColor
-            }
-          ])
-        }
         setMessage('Check your email for a confirmation link!')
       }
     } else {

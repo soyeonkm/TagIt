@@ -20,27 +20,14 @@ function Home() {
         <div className="hero-content">
           <div className="hero-text">
             <h1 className="hero-title">
-              Instant Photo Tagging & Organization
+              Instant Photo Tagging <br></br>
+              & Organization<br></br>
               <span className="highlight">—No Uploads, No Fuss</span>
             </h1>
             <p className="hero-subtitle">
               Transform your sports photography workflow with AI-powered tagging and intelligent project management. 
               Organize, categorize, and find your photos faster than ever before.
             </p>
-            <div className="hero-buttons">
-              <button 
-                className="btn btn-primary"
-                onClick={() => navigate('/dashboard')}
-              >
-                Get Started Free
-              </button>
-              <button 
-                className="btn btn-secondary"
-                onClick={scrollToFeatures}
-              >
-                Learn More
-              </button>
-            </div>
             <div className="hero-stats">
               <div className="stat">
                 <span className="stat-number">10x</span>
@@ -55,6 +42,20 @@ function Home() {
                 <span className="stat-label">Local Processing</span>
               </div>
             </div>
+            <div className="hero-buttons">
+              <button 
+                className="btn btn-primary"
+                onClick={() => navigate('/dashboard')}
+              >
+                Get Started Free
+              </button>
+              <button 
+                className="btn btn-secondary"
+                onClick={scrollToFeatures}
+              >
+                Learn More
+              </button>
+            </div>
           </div>
           <div className="hero-visual">
             <div className="hero-image-container">
@@ -64,12 +65,12 @@ function Home() {
                 className="hero-image"
               />
               <div className="floating-card card-1">
-                <div className="card-icon">🏷️</div>
-                <div className="card-text">AI Tags</div>
+                <div className="card-icon">🔍</div>
+                <div className="card-text">Jersey Number Detection</div>
               </div>
               <div className="floating-card card-2">
-                <div className="card-icon">📁</div>
-                <div className="card-text">Organized</div>
+                <div className="card-icon">🏈</div>
+                <div className="card-text">Player Name Detection</div>
               </div>
             </div>
           </div>

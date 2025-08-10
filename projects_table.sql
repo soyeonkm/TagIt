@@ -6,6 +6,10 @@ CREATE TABLE IF NOT EXISTS projects (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
+  folder_path TEXT,
+  roster_type TEXT CHECK (roster_type IN ('file', 'url')),
+  roster_data TEXT,
+  metadata_config JSONB DEFAULT '{}',
   description TEXT,
   image_url TEXT,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -36,3 +40,22 @@ CREATE INDEX IF NOT EXISTS idx_projects_user_id ON projects(user_id);
 
 -- Create an index on created_at for sorting
 CREATE INDEX IF NOT EXISTS idx_projects_created_at ON projects(created_at DESC);
+
+-- Add new columns to existing projects table
+ALTER TABLE projects 
+ADD COLUMN IF NOT EXISTS folder_path TEXT,
+ADD COLUMN IF NOT EXISTS roster_type TEXT CHECK (roster_type IN ('file', 'url')),
+ADD COLUMN IF NOT EXISTS roster_data TEXT,
+ADD COLUMN IF NOT EXISTS metadata_config JSONB DEFAULT '{}';
+
+-- Add the CHECK constraint if it doesn't exist
+DO $$ 
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.check_constraints 
+        WHERE constraint_name = 'projects_roster_type_check'
+    ) THEN
+        ALTER TABLE projects ADD CONSTRAINT projects_roster_type_check 
+        CHECK (roster_type IN ('file', 'url'));
+    END IF;
+END $$;

@@ -13,13 +13,30 @@ export const useAuth = () => {
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null)
+  const [accessToken, setAccessToken] = useState(null)
   const [loading, setLoading] = useState(true)
 
   // Initialize auth state
   useEffect(() => {
-    // For now, we'll start with no user and let Tauri backend handle authentication
-    // This ensures we're using the Tauri backend as the primary auth method
-    setLoading(false)
+    const initializeAuth = async () => {
+      try {
+        // Check if we're in a Tauri environment
+        if (typeof window !== 'undefined' && window.__TAURI__) {
+          // Tauri environment - check for existing user session
+          // For now, we'll start with no user and let the backend handle authentication
+          setLoading(false)
+        } else {
+          // Web environment - show message that Tauri is required
+          console.log('This application requires the Tauri desktop app to run.');
+          setLoading(false)
+        }
+      } catch (error) {
+        console.log('No existing session found');
+        setLoading(false);
+      }
+    };
+
+    initializeAuth();
   }, [])
 
   // Sign in with Tauri backend
@@ -39,6 +56,13 @@ export const AuthProvider = ({ children }) => {
           user_metadata: {} // Tauri backend doesn't provide user_metadata
         }
         setUser(userObj)
+        
+        // Store the access token if available
+        if (data.user.access_token) {
+          console.log('Debug - Setting accessToken in signIn:', data.user.access_token); // Debug log
+          setAccessToken(data.user.access_token)
+        }
+        
         return { data: { user: userObj }, error: null }
       }
       
@@ -50,7 +74,7 @@ export const AuthProvider = ({ children }) => {
   }
 
   // Sign up with Tauri backend
-  const signUp = async (email, password) => {
+  const signUp = async (email, password, profileData = null) => {
     try {
       const { data, error } = await tauriSupabase.auth.signUp({ email, password })
       if (error) {
@@ -66,6 +90,28 @@ export const AuthProvider = ({ children }) => {
           user_metadata: {} // Tauri backend doesn't provide user_metadata
         }
         setUser(userObj)
+        
+        // Store the access token if available
+        if (data.user.access_token) {
+          console.log('Debug - Setting accessToken in signUp:', data.user.access_token); // Debug log
+          setAccessToken(data.user.access_token)
+          
+          // If profile data is provided and we have an access token, create the profile
+          if (profileData && data.user.access_token) {
+            try {
+              // Add the user ID to the profile data
+              const profileWithId = {
+                ...profileData,
+                id: data.user.id
+              }
+              await tauriSupabase.from('profiles').insert([profileWithId], data.user.access_token)
+            } catch (profileError) {
+              console.error('Failed to create profile:', profileError)
+              // Don't fail the signup if profile creation fails
+            }
+          }
+        }
+        
         return { data: { user: userObj }, error: null }
       }
       
@@ -79,11 +125,18 @@ export const AuthProvider = ({ children }) => {
   // Sign out
   const signOut = async () => {
     try {
-      // For now, just clear the local user state
-      // We can implement Tauri backend sign out later if needed
+      // Sign out through Tauri backend
+      await tauriSupabase.auth.signOut();
+      
+      // Clear the local user state and access token
       setUser(null)
+      setAccessToken(null)
       return { error: null }
     } catch (error) {
+      console.error('Sign out error:', error);
+      // Still clear local state even if remote sign out fails
+      setUser(null);
+      setAccessToken(null);
       return { error }
     }
   }
@@ -95,6 +148,7 @@ export const AuthProvider = ({ children }) => {
 
   const value = {
     user,
+    accessToken,
     loading,
     signInWithPassword,
     signUp,

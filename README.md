@@ -92,8 +92,8 @@ TagIt/
 3. **Set up Supabase**
 
    - Create a new Supabase project
-   - Run the SQL from `projects_table.sql` in your Supabase SQL editor
-   - Update `frontend/src/supabaseClient.js` with your project credentials
+   - Run the SQL from `projects_table.sql` and `user_profile_table.sql` in your Supabase SQL editor
+   - Update `backend/TagIt/src-tauri/src/config.rs` with your project credentials
 
 4. **Install backend dependencies**
    ```bash

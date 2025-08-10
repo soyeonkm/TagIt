@@ -8,6 +8,7 @@ use crate::config::Config;
 pub struct AuthUser {
     pub id: String,
     pub email: String,
+    pub access_token: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -69,10 +70,19 @@ impl SupabaseService {
 
         if response.status().is_success() {
             let data: serde_json::Value = response.json().await?;
+            println!("Debug - Supabase sign_up response: {:?}", data); // Debug log
+            
             if let Some(user) = data.get("user") {
+                let access_token = data.get("access_token")
+                    .and_then(|t| t.as_str())
+                    .map(|s| s.to_string());
+                
+                println!("Debug - Extracted access_token: {:?}", access_token); // Debug log
+                
                 Ok(AuthUser {
                     id: user["id"].as_str().unwrap_or("").to_string(),
                     email: user["email"].as_str().unwrap_or("").to_string(),
+                    access_token,
                 })
             } else {
                 Err(anyhow::anyhow!("Sign up failed: no user data"))
@@ -99,10 +109,19 @@ impl SupabaseService {
 
         if response.status().is_success() {
             let data: serde_json::Value = response.json().await?;
+            println!("Debug - Supabase sign_in response: {:?}", data); // Debug log
+            
             if let Some(user) = data.get("user") {
+                let access_token = data.get("access_token")
+                    .and_then(|t| t.as_str())
+                    .map(|s| s.to_string());
+                
+                println!("Debug - Extracted access_token: {:?}", access_token); // Debug log
+                
                 Ok(AuthUser {
                     id: user["id"].as_str().unwrap_or("").to_string(),
                     email: user["email"].as_str().unwrap_or("").to_string(),
+                    access_token,
                 })
             } else {
                 Err(anyhow::anyhow!("Sign in failed: no user data"))
@@ -128,6 +147,7 @@ impl SupabaseService {
             Ok(AuthUser {
                 id: data["id"].as_str().unwrap_or("").to_string(),
                 email: data["email"].as_str().unwrap_or("").to_string(),
+                access_token: Some(access_token.to_string()),
             })
         } else {
             let error_text = response.text().await?;
@@ -136,12 +156,13 @@ impl SupabaseService {
     }
 
     // Profile management
-    pub async fn create_profile(&self, profile: Profile) -> Result<()> {
+    pub async fn create_profile(&self, profile: Profile, access_token: &str) -> Result<()> {
         let url = format!("{}/rest/v1/profiles", self.base_url);
 
         let response = self.client
             .post(&url)
             .header("apikey", &self.anon_key)
+            .header("Authorization", &format!("Bearer {}", access_token))
             .header("Content-Type", "application/json")
             .header("Prefer", "return=minimal")
             .json(&profile)
@@ -157,12 +178,13 @@ impl SupabaseService {
     }
 
     // Project management
-    pub async fn get_projects(&self, user_id: &str) -> Result<Vec<Project>> {
+    pub async fn get_projects(&self, user_id: &str, access_token: &str) -> Result<Vec<Project>> {
         let url = format!("{}/rest/v1/projects?user_id=eq.{}&order=created_at.desc", self.base_url, user_id);
 
         let response = self.client
             .get(&url)
             .header("apikey", &self.anon_key)
+            .header("Authorization", &format!("Bearer {}", access_token))
             .header("Content-Type", "application/json")
             .send()
             .await?;
@@ -176,12 +198,13 @@ impl SupabaseService {
         }
     }
 
-    pub async fn create_project(&self, project: Project) -> Result<Project> {
+    pub async fn create_project(&self, project: Project, access_token: &str) -> Result<Project> {
         let url = format!("{}/rest/v1/projects", self.base_url);
 
         let response = self.client
             .post(&url)
             .header("apikey", &self.anon_key)
+            .header("Authorization", &format!("Bearer {}", access_token))
             .header("Content-Type", "application/json")
             .header("Prefer", "return=representation")
             .json(&project)
@@ -197,12 +220,13 @@ impl SupabaseService {
         }
     }
 
-    pub async fn update_project(&self, project_id: &str, project: Project) -> Result<()> {
+    pub async fn update_project(&self, project_id: &str, project: Project, access_token: &str) -> Result<()> {
         let url = format!("{}/rest/v1/projects?id=eq.{}", self.base_url, project_id);
 
         let response = self.client
             .patch(&url)
             .header("apikey", &self.anon_key)
+            .header("Authorization", &format!("Bearer {}", access_token))
             .header("Content-Type", "application/json")
             .header("Prefer", "return=minimal")
             .json(&project)
@@ -217,12 +241,13 @@ impl SupabaseService {
         }
     }
 
-    pub async fn delete_project(&self, project_id: &str) -> Result<()> {
+    pub async fn delete_project(&self, project_id: &str, access_token: &str) -> Result<()> {
         let url = format!("{}/rest/v1/projects?id=eq.{}", self.base_url, project_id);
 
         let response = self.client
             .delete(&url)
             .header("apikey", &self.anon_key)
+            .header("Authorization", &format!("Bearer {}", access_token))
             .header("Content-Type", "application/json")
             .header("Prefer", "return=minimal")
             .send()
@@ -237,12 +262,13 @@ impl SupabaseService {
     }
 
     // Get project by ID
-    pub async fn get_project_by_id(&self, project_id: &str, user_id: &str) -> Result<Option<Project>> {
+    pub async fn get_project_by_id(&self, project_id: &str, user_id: &str, access_token: &str) -> Result<Option<Project>> {
         let url = format!("{}/rest/v1/projects?id=eq.{}&user_id=eq.{}", self.base_url, project_id, user_id);
 
         let response = self.client
             .get(&url)
             .header("apikey", &self.anon_key)
+            .header("Authorization", &format!("Bearer {}", access_token))
             .header("Content-Type", "application/json")
             .send()
             .await?;
@@ -257,12 +283,13 @@ impl SupabaseService {
     }
 
     // Get profile by user ID
-    pub async fn get_profile(&self, user_id: &str) -> Result<Option<Profile>> {
+    pub async fn get_profile(&self, user_id: &str, access_token: &str) -> Result<Option<Profile>> {
         let url = format!("{}/rest/v1/profiles?id=eq.{}", self.base_url, user_id);
 
         let response = self.client
             .get(&url)
             .header("apikey", &self.anon_key)
+            .header("Authorization", &format!("Bearer {}", access_token))
             .header("Content-Type", "application/json")
             .send()
             .await?;

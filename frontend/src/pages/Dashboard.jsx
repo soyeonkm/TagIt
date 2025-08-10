@@ -50,40 +50,9 @@ function Dashboard() {
   }
 
   const handleAddProject = async () => {
-    try {
-      if (!user) {
-        setError('User not authenticated')
-        return
-      }
-
-      // Create new project using Tauri backend
-      const { data, error } = await tauriSupabase
-        .from('projects')
-        .insert([
-          {
-            user_id: user.id,
-            name: `Project ${projects.length + 1}`,
-            description: 'New project',
-            image_url: 'https://img.freepik.com/premium-vector/photographer-with-camera-flat-vector-illustration_648489-88.jpg'
-          }
-        ])
-
-      if (error) {
-        console.error('Error creating project:', error)
-        setError('Failed to create project')
-      } else {
-        // Refresh projects list
-        await fetchProjects()
-        // Navigate to the new project
-        if (data && data[0]) {
-          navigate(`/project/${data[0].id}`)
-        }
-      }
-    } catch (error) {
-      console.error('Error:', error)
-      setError('Failed to create project')
-    }
-  }
+    // Navigate to the create project page
+    navigate('/create-project');
+  };
 
   const handleProjectClick = (projectId) => {
     navigate(`/project/${projectId}`)

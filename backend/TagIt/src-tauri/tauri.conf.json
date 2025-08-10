@@ -24,5 +24,27 @@
   "bundle": {
     "active": false,
     "targets": "all"
+  },
+  "plugins": {
+    "fs": {
+      "scope": {
+        "allow": ["**"],
+        "requireLiteralLeadingDot": false,
+        "directories": [
+          "$APPDATA/tagit",
+          "$DOCUMENTS/tagit",
+          "$PICTURES/tagit"
+        ]
+      }
+    },
+    "http": {
+      "scope": {
+        "allow": [
+          "https://*.supabase.co/**",
+          "https://supabase.co/**"
+        ],
+        "requireLiteralLeadingDot": false
+      }
+    }
   }
 }
