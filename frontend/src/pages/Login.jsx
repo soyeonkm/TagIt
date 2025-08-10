@@ -1,6 +1,7 @@
 // Import required hooks and modules
 import { useState } from 'react'
-import { supabase } from '../supabaseClient' // Supabase client for auth & database
+import { tauriSupabase } from '../tauriClient' // Tauri backend client
+import { supabase } from '../supabaseClient' // Keep for password reset
 import { useNavigate } from 'react-router-dom' // Hook to navigate between routes
 
 function Login() {
@@ -24,8 +25,8 @@ function Login() {
       // Always use sub-accent-color for profile color
       const profileColor = 'var(--sub-accent-color)'
 
-      // Call Supabase signUp method
-      const { data, error } = await supabase.auth.signUp({
+      // Call Tauri backend signUp method
+      const { data, error } = await tauriSupabase.auth.signUp({
         email,
         password
       })
@@ -36,7 +37,7 @@ function Login() {
         // If signup is successful, insert user profile into the 'profiles' table
         const userId = data.user?.id
         if (userId) {
-          await supabase.from('profiles').insert([
+          await tauriSupabase.from('profiles').insert([
             {
               id: userId,
               first_name: firstName,
@@ -48,8 +49,8 @@ function Login() {
         setMessage('Check your email for a confirmation link!')
       }
     } else {
-      // Handle user login
-      const { error } = await supabase.auth.signInWithPassword({ email, password })
+      // Handle user login using Tauri backend
+      const { error } = await tauriSupabase.auth.signInWithPassword({ email, password })
       if (error) {
         setError(error.message)
       } else {
@@ -59,7 +60,7 @@ function Login() {
     }
   }
 
-  // Handle password reset request
+  // Handle password reset request - still uses direct Supabase for now
   const handleReset = async (e) => {
     e.preventDefault()
     setError('')
