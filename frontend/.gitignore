@@ -31,4 +31,33 @@ dist-ssr
 *.ntvs*
 *.njsproj
 *.sln
-*.sw? 
+*.sw?
+
+# ========================================
+# SENSITIVE CONTENT PROTECTION
+# ========================================
+
+# Configuration files with sensitive data
+config/
+config.js
+config.json
+auth.js
+auth.json
+
+# API keys and secrets
+*.key
+*.pem
+secrets/
+secrets.json
+credentials.json
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Temporary and cache files
+.cache/
+.parcel-cache/
+temp/
+tmp/ 
