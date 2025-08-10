@@ -6,23 +6,26 @@ import Login from './pages/Login'
 import Profile from './pages/Profile'
 import Project from './pages/Project'
 import ResetPassword from './pages/ResetPassword'
+import { AuthProvider } from './contexts/AuthContext'
 
 function App() {
   return (
-    <div className="app">
-      <Navbar />
-      <main className="main-content">
-        <Routes>
-          <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="/project" element={<Project />} />
-          <Route path="/project/:id" element={<Project />} />
-          <Route path="/" element={<Home />} />
-          <Route path="/login" element={<Login />} />
-          <Route path="/profile" element={<Profile />} />
-          <Route path="/reset-password" element={<ResetPassword />} />
-        </Routes>
-      </main>
-    </div>
+    <AuthProvider>
+      <div className="app">
+        <Navbar />
+        <main className="main-content">
+          <Routes>
+            <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/project" element={<Project />} />
+            <Route path="/project/:id" element={<Project />} />
+            <Route path="/" element={<Home />} />
+            <Route path="/login" element={<Login />} />
+            <Route path="/profile" element={<Profile />} />
+            <Route path="/reset-password" element={<ResetPassword />} />
+          </Routes>
+        </main>
+      </div>
+    </AuthProvider>
   )
 }
 

@@ -1,8 +1,8 @@
 // Import required hooks and modules
 import { useState } from 'react'
 import { tauriSupabase } from '../tauriClient' // Tauri backend client
-import { supabase } from '../supabaseClient' // Keep for password reset
 import { useNavigate } from 'react-router-dom' // Hook to navigate between routes
+import { useAuth } from '../contexts/AuthContext' // Authentication context
 
 function Login() {
   // State variables for form fields and UI states
@@ -14,6 +14,7 @@ function Login() {
   const [firstName, setFirstName] = useState('')  // First name for signup
   const [lastName, setLastName] = useState('')    // Last name for signup
   const navigate = useNavigate()                  // Router navigation hook
+  const { signInWithPassword, signUp } = useAuth() // Authentication methods
 
   // Handle login or signup form submission
   const handleAuth = async (e) => {
@@ -26,10 +27,7 @@ function Login() {
       const profileColor = 'var(--sub-accent-color)'
 
       // Call Tauri backend signUp method
-      const { data, error } = await tauriSupabase.auth.signUp({
-        email,
-        password
-      })
+      const { data, error } = await signUp(email, password)
 
       if (error) {
         setError(error.message)
@@ -49,31 +47,33 @@ function Login() {
         setMessage('Check your email for a confirmation link!')
       }
     } else {
-      // Handle user login using Tauri backend
-      const { error } = await tauriSupabase.auth.signInWithPassword({ email, password })
+      // Handle user login using Tauri backend via AuthContext
+      console.log('Attempting login with Tauri backend...')
+      const { data, error } = await signInWithPassword(email, password)
       if (error) {
+        console.error('Login error:', error)
         setError(error.message)
       } else {
+        console.log('Login successful:', data)
         setMessage('Logged in successfully!')
-        navigate('/dashboard') // redirect to dashboard page when logged in
+        // Add a small delay to ensure authentication state is properly set
+        setTimeout(() => {
+          console.log('Navigating to dashboard...')
+          navigate('/dashboard') // redirect to dashboard page when logged in
+        }, 100)
       }
     }
   }
 
-  // Handle password reset request - still uses direct Supabase for now
+  // Handle password reset request
   const handleReset = async (e) => {
     e.preventDefault()
     setError('')
     setMessage('')
 
-    console.log('Requesting password reset for email:', email)
-    console.log('Redirect URL:', `${window.location.origin}/reset-password`)
-
-    const { data, error } = await supabase.auth.resetPasswordForEmail(email, {
+    const { data, error } = await tauriSupabase.auth.resetPasswordForEmail(email, {
       redirectTo: `${window.location.origin}/reset-password`
     })
-    
-    console.log('Reset password response:', { data, error })
     
     if (error) {
       setError(error.message)
@@ -84,36 +84,28 @@ function Login() {
 
   // Render form UI
   return (
-    <div style={{
-      minHeight: '70vh',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center'
-    }}>
-      <div style={{
-        maxWidth: 400,
-        width: '100%',
-        padding: 32,
-        background: '#fff',
-        borderRadius: 8,
-        boxShadow: '0 2px 8px rgba(0,0,0,0.08)'
-      }}>
-        <h2 style={{ textAlign: 'center', marginBottom: 24 }}>
-          {/* Dynamic form title based on mode */}
-          {isSignUp ? 'Create Account' : 'Log In'}
-        </h2>
+    <div className="auth-container">
+      <div className="auth-card">
+        <div className="auth-header">
+          <h2 className="auth-title">
+            {isSignUp ? 'Create Account' : 'Welcome Back'}
+          </h2>
+          <p className="auth-subtitle">
+            {isSignUp ? 'Start organizing your photos today' : 'Sign in to your account'}
+          </p>
+        </div>
 
-        <form onSubmit={handleAuth}>
+        <form onSubmit={handleAuth} className="auth-form">
           {/* Show first/last name fields only in signup mode */}
           {isSignUp && (
-            <>
+            <div className="name-fields">
               <input
                 type="text"
                 placeholder="First Name"
                 value={firstName}
                 onChange={e => setFirstName(e.target.value)}
                 required
-                style={{ width: '100%', marginBottom: 12, padding: 8, fontSize: 16 }}
+                className="auth-input"
               />
               <input
                 type="text"
@@ -121,9 +113,9 @@ function Login() {
                 value={lastName}
                 onChange={e => setLastName(e.target.value)}
                 required
-                style={{ width: '100%', marginBottom: 12, padding: 8, fontSize: 16 }}
+                className="auth-input"
               />
-            </>
+            </div>
           )}
 
           {/* Email input field */}
@@ -133,7 +125,7 @@ function Login() {
             value={email}
             onChange={e => setEmail(e.target.value)}
             required
-            style={{ width: '100%', marginBottom: 12, padding: 8, fontSize: 16 }}
+            className="auth-input"
           />
 
           {/* Password input field */}
@@ -143,73 +135,43 @@ function Login() {
             value={password}
             onChange={e => setPassword(e.target.value)}
             required
-            style={{ width: '100%', marginBottom: 12, padding: 8, fontSize: 16 }}
+            className="auth-input"
           />
 
           {/* Error or status messages */}
-          {error && <div style={{ color: 'red', marginBottom: 12 }}>{error}</div>}
-          {message && <div style={{ color: 'green', marginBottom: 12 }}>{message}</div>}
+          {error && (
+            <div className="message error">
+              <div className="message-icon">⚠️</div>
+              <span>{error}</span>
+            </div>
+          )}
+          {message && (
+            <div className="message success">
+              <div className="message-icon">✅</div>
+              <span>{message}</span>
+            </div>
+          )}
 
           {/* Submit button */}
-          <button
-            type="submit"
-            style={{
-              width: '100%',
-              padding: 10,
-              fontSize: 16,
-              background: 'var(--accent-color)',
-              color: '#fff',
-              border: 'none',
-              borderRadius: 4,
-              marginBottom: 12
-            }}>
-            {isSignUp ? 'Sign Up' : 'Log In'}
+          <button type="submit" className="auth-button">
+            {isSignUp ? 'Create Account' : 'Sign In'}
           </button>
         </form>
 
         {/* Buttons to toggle between login/signup and forgot password */}
-        <div style={{
-          textAlign: 'center',
-          marginTop: 0,
-          display: 'flex',
-          justifyContent: 'center',
-          gap: 12
-        }}>
-          <div style={{ display: 'flex', width: '100%', gap: 8 }}>
-            <button
-              onClick={() => setIsSignUp(!isSignUp)}
-              style={{
-                background: 'var(--accent-color)',
-                border: 'none',
-                color: '#fff',
-                cursor: 'pointer',
-                borderRadius: 4,
-                fontSize: 12,
-                padding: '10px 0',
-                fontFamily: 'var(--main-font)',
-                flex: 1
-              }}
-            >
-              {/* Toggle login/signup text */}
-              {isSignUp ? 'Already have an account? Log In' : 'Need an account? Sign Up'}
-            </button>
-            <button
-              onClick={handleReset}
-              style={{
-                background: 'var(--accent-color)',
-                border: 'none',
-                color: '#fff',
-                cursor: 'pointer',
-                borderRadius: 4,
-                fontSize: 12,
-                padding: '10px 0',
-                fontFamily: 'var(--main-font)',
-                flex: 1
-              }}
-            >
-              Forgot password?
-            </button>
-          </div>
+        <div className="auth-actions">
+          <button
+            onClick={() => setIsSignUp(!isSignUp)}
+            className="auth-toggle-button"
+          >
+            {isSignUp ? 'Already have an account? Sign In' : 'Need an account? Sign Up'}
+          </button>
+          <button
+            onClick={handleReset}
+            className="auth-reset-button"
+          >
+            Forgot password?
+          </button>
         </div>
       </div>
     </div>

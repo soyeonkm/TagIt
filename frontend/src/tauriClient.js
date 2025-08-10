@@ -31,11 +31,13 @@ export const tauriAuth = {
     }
   },
 
-  // Password reset still uses direct Supabase for now
-  resetPasswordForEmail: async (email, options) => {
-    // This will still use the original supabase client
-    // We can implement this in the backend later
-    throw new Error('Password reset not yet implemented in backend');
+  resetPasswordForEmail: async (email) => {
+    try {
+      await invoke('reset_password', { email });
+      return { data: null, error: null };
+    } catch (error) {
+      return { data: null, error: { message: error } };
+    }
   }
 };
 
@@ -47,12 +49,46 @@ export const tauriProfiles = {
     } catch (error) {
       return { data: null, error: { message: error } };
     }
-  }
+  },
+
+  select: (columns = '*') => ({
+    eq: (field, value) => ({
+      single: async () => {
+        try {
+          if (field === 'id') {
+            const profile = await invoke('get_profile', { userId: value });
+            return { data: profile, error: null };
+          } else {
+            return { data: null, error: { message: 'Field not supported' } };
+          }
+        } catch (error) {
+          return { data: null, error: { message: error } };
+        }
+      }
+    })
+  })
 };
 
 export const tauriProjects = {
   select: (columns = '*') => ({
     eq: (field, value) => ({
+      eq: (field2, value2) => ({
+        single: async () => {
+          try {
+            if (field === 'id' && field2 === 'user_id') {
+              const project = await invoke('get_project_by_id', { 
+                projectId: value, 
+                userId: value2 
+              });
+              return { data: project, error: null };
+            } else {
+              return { data: null, error: { message: 'Field combination not supported' } };
+            }
+          } catch (error) {
+            return { data: null, error: { message: error } };
+          }
+        }
+      }),
       order: (field, direction) => ({
         // This is a mock implementation - we'll need to implement proper querying
         async then(resolve) {

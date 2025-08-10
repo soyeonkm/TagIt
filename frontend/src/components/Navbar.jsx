@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { supabase } from '../supabaseClient'
+import { tauriSupabase } from '../tauriClient'
 import { useCallback } from 'react'
+import { useAuth } from '../contexts/AuthContext'
 
 function Navbar() {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false)
@@ -9,10 +10,10 @@ function Navbar() {
   const dropdownRef = useRef(null)
   const menuRef = useRef(null)
   const navigate = useNavigate()
-  const [user, setUser] = useState(null)
   const [showLogoutMsg, setShowLogoutMsg] = useState(false)
   const [logoutMsgOpacity, setLogoutMsgOpacity] = useState(1)
   const [profile, setProfile] = useState(null)
+  const { user, signOut } = useAuth()
 
   
   useEffect(() => {
@@ -31,24 +32,12 @@ function Navbar() {
     }
   }, [])
 
-  useEffect(() => {
-    // Check initial user state
-    supabase.auth.getUser().then(({ data }) => setUser(data.user))
 
-    // Listen for auth changes
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null)
-    })
-
-    return () => {
-      listener.subscription.unsubscribe()
-    }
-  }, [])
 
   useEffect(() => {
     if (user) {
       // Fetch profile from SQL table
-      supabase
+      tauriSupabase
         .from('profiles')
         .select('*')
         .eq('id', user.id)
@@ -198,7 +187,7 @@ function Navbar() {
                     </button>
                     <button
                       onClick={async () => {
-                        await supabase.auth.signOut()
+                        await signOut()
                         navigate('/')
                         setIsDropdownOpen(false)
                         setShowLogoutMsg(true)

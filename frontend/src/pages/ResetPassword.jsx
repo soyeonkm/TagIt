@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { supabase } from '../supabaseClient'
+import { tauriSupabase } from '../tauriClient'
 import { useNavigate, useLocation } from 'react-router-dom'
 
 function ResetPassword() {
@@ -57,7 +57,7 @@ function ResetPassword() {
       window.history.replaceState({}, document.title, window.location.pathname)
     } else {
       // Check if user is already authenticated (this happens when Supabase auto-logs in the user)
-      supabase.auth.getUser().then(({ data: { user }, error }) => {
+      tauriSupabase.auth.getUser().then(({ data: { user }, error }) => {
         if (user && !error) {
           // User is authenticated, we can proceed with password reset
           setIsValidToken(true)
@@ -92,7 +92,7 @@ function ResetPassword() {
 
     try {
       // Check if user is authenticated
-      const { data: { user }, error: userError } = await supabase.auth.getUser()
+      const { data: { user }, error: userError } = await tauriSupabase.auth.getUser()
       
       if (userError || !user) {
         setError('Reset session expired. Please request a new password reset.')
@@ -100,7 +100,7 @@ function ResetPassword() {
       }
 
       // Update the password
-      const { error } = await supabase.auth.updateUser({
+      const { error } = await tauriSupabase.auth.updateUser({
         password: newPassword
       })
 
@@ -113,7 +113,7 @@ function ResetPassword() {
         localStorage.removeItem('reset_code')
         
         // Sign out the user after password reset
-        await supabase.auth.signOut()
+        await tauriSupabase.auth.signOut()
         
         setMessage('Password updated successfully! Redirecting to login...')
         setTimeout(() => {

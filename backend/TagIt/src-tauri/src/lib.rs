@@ -1,3 +1,4 @@
+mod config;
 mod supabase;
 
 use supabase::{SupabaseService, AuthUser, Profile, Project};
@@ -30,11 +31,23 @@ async fn create_profile(profile: Profile) -> Result<(), String> {
     service.create_profile(profile).await.map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+async fn get_profile(user_id: String) -> Result<Option<Profile>, String> {
+    let service = SupabaseService::new().map_err(|e| e.to_string())?;
+    service.get_profile(&user_id).await.map_err(|e| e.to_string())
+}
+
 // Tauri commands for project management
 #[tauri::command]
 async fn get_projects(user_id: String) -> Result<Vec<Project>, String> {
     let service = SupabaseService::new().map_err(|e| e.to_string())?;
     service.get_projects(&user_id).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn get_project_by_id(project_id: String, user_id: String) -> Result<Option<Project>, String> {
+    let service = SupabaseService::new().map_err(|e| e.to_string())?;
+    service.get_project_by_id(&project_id, &user_id).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -55,6 +68,19 @@ async fn delete_project(project_id: String) -> Result<(), String> {
     service.delete_project(&project_id).await.map_err(|e| e.to_string())
 }
 
+// Tauri commands for password reset
+#[tauri::command]
+async fn reset_password(email: String) -> Result<(), String> {
+    let service = SupabaseService::new().map_err(|e| e.to_string())?;
+    service.reset_password(&email).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn update_password(access_token: String, new_password: String) -> Result<(), String> {
+    let service = SupabaseService::new().map_err(|e| e.to_string())?;
+    service.update_password(&access_token, &new_password).await.map_err(|e| e.to_string())
+}
+
 // Keep the original greet command for testing
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -71,10 +97,14 @@ pub fn run() {
             sign_in,
             get_user,
             create_profile,
+            get_profile,
             get_projects,
+            get_project_by_id,
             create_project,
             update_project,
-            delete_project
+            delete_project,
+            reset_password,
+            update_password
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

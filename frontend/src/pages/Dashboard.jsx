@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { supabase } from '../supabaseClient'
+import { tauriSupabase } from '../tauriClient'
+import { useAuth } from '../contexts/AuthContext'
 
 function Dashboard() {
   const [addHover, setAddHover] = useState(false)
@@ -8,22 +9,27 @@ function Dashboard() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const navigate = useNavigate()
+  const { user, loading: authLoading } = useAuth()
 
   // Fetch projects on component mount
   useEffect(() => {
-    fetchProjects()
-  }, [])
+    if (user) {
+      fetchProjects()
+    }
+  }, [user])
 
   const fetchProjects = async () => {
     try {
-      const { data: { user } } = await supabase.auth.getUser()
       if (!user) {
+        console.log('No user found, redirecting to login')
         setError('User not authenticated')
         setLoading(false)
+        navigate('/login')
         return
       }
 
-      const { data, error } = await supabase
+      // Use Tauri backend to fetch projects
+      const { data, error } = await tauriSupabase
         .from('projects')
         .select('*')
         .eq('user_id', user.id)
@@ -45,14 +51,13 @@ function Dashboard() {
 
   const handleAddProject = async () => {
     try {
-      const { data: { user } } = await supabase.auth.getUser()
       if (!user) {
         setError('User not authenticated')
         return
       }
 
-      // Create new project
-      const { data, error } = await supabase
+      // Create new project using Tauri backend
+      const { data, error } = await tauriSupabase
         .from('projects')
         .insert([
           {
@@ -62,7 +67,6 @@ function Dashboard() {
             image_url: 'https://img.freepik.com/premium-vector/photographer-with-camera-flat-vector-illustration_648489-88.jpg'
           }
         ])
-        .select()
 
       if (error) {
         console.error('Error creating project:', error)
@@ -85,177 +89,95 @@ function Dashboard() {
     navigate(`/project/${projectId}`)
   }
 
+  if (authLoading) {
+    return (
+      <div className="dashboard-container">
+        <div className="loading-state">
+          <div className="loading-spinner"></div>
+          <p>Loading authentication...</p>
+        </div>
+      </div>
+    )
+  }
+
   if (loading) {
     return (
-      <div style={{ 
-        padding: '2rem',
-        fontFamily: 'var(--main-font)',
-        textAlign: 'center'
-      }}>
-        <div>Loading projects...</div>
+      <div className="dashboard-container">
+        <div className="loading-state">
+          <div className="loading-spinner"></div>
+          <p>Loading projects...</p>
+        </div>
       </div>
     )
   }
 
   return (
-    <div style={{ 
-      padding: '2rem',
-      fontFamily: 'var(--main-font)'
-    }}>
-      <h1 style={{ 
-        fontFamily: 'var(--main-font)',
-        marginBottom: '2rem',
-        color: 'var(--text-color)',
-        textAlign: 'center'
-      }}>
-        Dashboard
-      </h1>
+    <div className="dashboard-container">
+      <div className="dashboard-header">
+        <h1 className="dashboard-title">My Projects</h1>
+        <p className="dashboard-subtitle">Organize and manage your photo collections</p>
+      </div>
 
       {error && (
-        <div style={{
-          color: 'red',
-          textAlign: 'center',
-          marginBottom: '1rem',
-          padding: '0.5rem',
-          backgroundColor: '#ffebee',
-          borderRadius: '4px'
-        }}>
-          {error}
+        <div className="error-message">
+          <div className="error-icon">⚠️</div>
+          <span>{error}</span>
         </div>
       )}
       
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
-        gap: '1.5rem',
-        maxWidth: '100%'
-      }}>
+      <div className="projects-grid">
         {/* Add Project Tile */}
         <button
+          className={`add-project-card ${addHover ? 'hover' : ''}`}
           onClick={handleAddProject}
-          style={{
-            width: '100%',
-            aspectRatio: '1',
-            position: 'relative',
-            boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
-            borderRadius: '5px',
-            border: 'none',
-            padding: 0,
-            background: 'none',
-            cursor: 'pointer',
-            overflow: 'hidden',
-            display: 'flex',
-            flexDirection: 'column'
-          }}
           onMouseEnter={() => setAddHover(true)}
           onMouseLeave={() => setAddHover(false)}
         >
-          <div style={{
-            width: '100%',
-            height: '80%',
-            border: 'none',
-            borderBottomLeftRadius: '0',
-            borderBottomRightRadius: '0',
-            borderRadius: '5px 5px 0 0',
-            backgroundColor: addHover ? 'var(--hover-color)' : 'var(--navbar-color)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontSize: '3rem',
-            color: addHover ? 'white' : 'var(--hover-color)',
-            fontFamily: 'var(--main-font)',
-            transition: 'background 0.2s, color 0.2s'
-          }}>
-            +
+          <div className="add-project-icon">
+            <span>+</span>
           </div>
-          <div style={{
-            width: '100%',
-            height: '20%',
-            backgroundColor: 'var(--sub-accent-color)',
-            borderTopLeftRadius: '0',
-            borderTopRightRadius: '0',
-            borderRadius: '0 0 5px 5px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontSize: '0.9rem',
-            color: 'white',
-            fontFamily: 'var(--main-font)'
-          }}>
-            Add Project
-          </div>
+          <div className="add-project-label">Add New Project</div>
         </button>
 
         {/* Project Tiles */}
         {projects.map((project) => (
           <button
             key={project.id}
+            className="project-card"
             onClick={() => handleProjectClick(project.id)}
-            style={{
-              width: '100%',
-              aspectRatio: '1',
-              position: 'relative',
-              boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
-              borderRadius: '5px',
-              border: 'none',
-              padding: 0,
-              background: 'none',
-              cursor: 'pointer',
-              overflow: 'hidden',
-              display: 'flex',
-              flexDirection: 'column'
-            }}
           >
-            <div style={{
-              width: '100%',
-              height: '80%',
-              borderBottomLeftRadius: '0',
-              borderBottomRightRadius: '0',
-              borderRadius: '5px 5px 0 0',
-              backgroundColor: 'var(--navbar-color)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: '1.2rem',
-              color: 'var(--text-color)',
-              fontFamily: 'var(--main-font)',
-              overflow: 'hidden'
-            }}
-            onMouseOver={e => e.currentTarget.style.opacity = '80%'}
-            onMouseOut ={e => e.currentTarget.style.opacity = '100%'}
-            >
+            <div className="project-image-container">
               <img
                 src={project.image_url || 'https://img.freepik.com/premium-vector/photographer-with-camera-flat-vector-illustration_648489-88.jpg'}
                 alt={project.name}
-                style={{
-                  width: '100%',
-                  height: '100%',
-                  objectFit: 'cover',
-                  display: 'block',
-                  borderTopLeftRadius: '5px',
-                  borderTopRightRadius: '5px'
-                }}
+                className="project-image"
               />
+              <div className="project-overlay">
+                <div className="project-overlay-content">
+                  <span className="view-project">View Project</span>
+                </div>
+              </div>
             </div>
-            <div style={{
-              width: '100%',
-              height: '20%',
-              backgroundColor: 'var(--sub-accent-color)',
-              borderTopLeftRadius: '0',
-              borderTopRightRadius: '0',
-              borderRadius: '0 0 5px 5px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: '0.9rem',
-              color: 'white',
-              fontFamily: 'var(--main-font)'
-            }}>
-              {project.name}
+            <div className="project-info">
+              <h3 className="project-name">{project.name}</h3>
+              <p className="project-description">{project.description}</p>
+              <div className="project-meta">
+                <span className="project-date">
+                  {new Date(project.created_at).toLocaleDateString()}
+                </span>
+              </div>
             </div>
           </button>
         ))}
       </div>
+
+      {projects.length === 0 && !loading && (
+        <div className="empty-state">
+          <div className="empty-state-icon">📸</div>
+          <h3>No projects yet</h3>
+          <p>Create your first project to get started with photo organization</p>
+        </div>
+      )}
     </div>
   )
 }

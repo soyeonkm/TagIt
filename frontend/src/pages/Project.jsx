@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { supabase } from '../supabaseClient'
+import { tauriSupabase } from '../tauriClient'
 
 function Project() {
   const { id } = useParams()
@@ -19,14 +19,14 @@ function Project() {
 
   const fetchProject = async () => {
     try {
-      const { data: { user } } = await supabase.auth.getUser()
+      const { data: { user } } = await tauriSupabase.auth.getUser()
       if (!user) {
         setError('User not authenticated')
         setLoading(false)
         return
       }
 
-      const { data, error } = await supabase
+      const { data, error } = await tauriSupabase
         .from('projects')
         .select('*')
         .eq('id', id)
@@ -49,151 +49,119 @@ function Project() {
 
   if (loading) {
     return (
-      <div style={{ 
-        padding: '2rem',
-        fontFamily: 'var(--main-font)',
-        textAlign: 'center'
-      }}>
-        <div>Loading project...</div>
+      <div className="project-container">
+        <div className="loading-state">
+          <div className="loading-spinner"></div>
+          <p>Loading project...</p>
+        </div>
       </div>
     )
   }
 
   if (error) {
     return (
-      <div style={{ 
-        padding: '2rem',
-        fontFamily: 'var(--main-font)',
-        textAlign: 'center'
-      }}>
-        <div style={{ color: 'red', marginBottom: '1rem' }}>{error}</div>
-        <button
-          onClick={() => navigate('/dashboard')}
-          style={{
-            padding: '0.5rem 1rem',
-            backgroundColor: 'var(--accent-color)',
-            color: 'white',
-            border: 'none',
-            borderRadius: '4px',
-            cursor: 'pointer'
-          }}
-        >
-          Back to Dashboard
-        </button>
+      <div className="project-container">
+        <div className="error-state">
+          <div className="error-icon">⚠️</div>
+          <h3>Project Not Found</h3>
+          <p>{error}</p>
+          <button
+            onClick={() => navigate('/dashboard')}
+            className="btn btn-primary"
+          >
+            Back to Dashboard
+          </button>
+        </div>
       </div>
     )
   }
 
   if (!id) {
     return (
-      <div style={{ 
-        padding: '2rem',
-        fontFamily: 'var(--main-font)',
-        textAlign: 'center'
-      }}>
-        <h1>Project Page</h1>
-        <p>No project selected. Please select a project from the dashboard.</p>
-        <button
-          onClick={() => navigate('/dashboard')}
-          style={{
-            padding: '0.5rem 1rem',
-            backgroundColor: 'var(--accent-color)',
-            color: 'white',
-            border: 'none',
-            borderRadius: '4px',
-            cursor: 'pointer',
-            marginTop: '1rem'
-          }}
-        >
-          Go to Dashboard
-        </button>
+      <div className="project-container">
+        <div className="no-project-state">
+          <div className="no-project-icon">📁</div>
+          <h3>No Project Selected</h3>
+          <p>Please select a project from the dashboard to get started.</p>
+          <button
+            onClick={() => navigate('/dashboard')}
+            className="btn btn-primary"
+          >
+            Go to Dashboard
+          </button>
+        </div>
       </div>
     )
   }
 
   return (
-    <div style={{ 
-      padding: '2rem',
-      fontFamily: 'var(--main-font)',
-      maxWidth: '800px',
-      margin: '0 auto'
-    }}>
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        marginBottom: '2rem',
-        gap: '1rem'
-      }}>
+    <div className="project-container">
+      <div className="project-header">
         <button
           onClick={() => navigate('/dashboard')}
-          style={{
-            padding: '0.5rem 1rem',
-            backgroundColor: 'var(--accent-color)',
-            color: 'white',
-            border: 'none',
-            borderRadius: '4px',
-            cursor: 'pointer'
-          }}
+          className="back-button"
         >
-          ← Back to Dashboard
+          <span className="back-arrow">←</span>
+          Back to Dashboard
         </button>
-        <h1 style={{ 
-          margin: 0,
-          color: 'var(--text-color)'
-        }}>
-          {project?.name || 'Project'}
-        </h1>
+        <div className="project-title-section">
+          <h1 className="project-title">{project?.name || 'Project'}</h1>
+          <p className="project-subtitle">Manage your photo collection</p>
+        </div>
       </div>
 
       {project && (
-        <div style={{
-          backgroundColor: 'white',
-          borderRadius: '8px',
-          boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
-          padding: '2rem'
-        }}>
-          <div style={{
-            display: 'flex',
-            gap: '2rem',
-            marginBottom: '2rem'
-          }}>
-            <img
-              src={project.image_url || 'https://img.freepik.com/premium-vector/photographer-with-camera-flat-vector-illustration_648489-88.jpg'}
-              alt={project.name}
-              style={{
-                width: '200px',
-                height: '200px',
-                objectFit: 'cover',
-                borderRadius: '8px'
-              }}
-            />
-            <div style={{ flex: 1 }}>
-              <h2 style={{ marginTop: 0, color: 'var(--text-color)' }}>
-                {project.name}
-              </h2>
-              <p style={{ color: 'var(--text-color)', lineHeight: '1.6' }}>
-                {project.description}
-              </p>
-              <p style={{ 
-                color: 'var(--text-color)', 
-                fontSize: '0.9rem',
-                opacity: 0.7
-              }}>
-                Created: {new Date(project.created_at).toLocaleDateString()}
-              </p>
+        <div className="project-content">
+          <div className="project-overview">
+            <div className="project-image-section">
+              <img
+                src={project.image_url || 'https://img.freepik.com/premium-vector/photographer-with-camera-flat-vector-illustration_648489-88.jpg'}
+                alt={project.name}
+                className="project-hero-image"
+              />
+            </div>
+            <div className="project-details">
+              <h2 className="project-name">{project.name}</h2>
+              <p className="project-description">{project.description}</p>
+              <div className="project-meta">
+                <div className="meta-item">
+                  <span className="meta-label">Created</span>
+                  <span className="meta-value">
+                    {new Date(project.created_at).toLocaleDateString()}
+                  </span>
+                </div>
+                <div className="meta-item">
+                  <span className="meta-label">Status</span>
+                  <span className="meta-value status-active">Active</span>
+                </div>
+              </div>
             </div>
           </div>
 
-          <div style={{
-            borderTop: '1px solid #eee',
-            paddingTop: '2rem'
-          }}>
-            <h3 style={{ color: 'var(--text-color)', marginBottom: '1rem' }}>
-              Project Details
-            </h3>
-            <p style={{ color: 'var(--text-color)' }}>
-              This is where you can add more project functionality like tasks, files, or other features.
-            </p>
+          <div className="project-sections">
+            <div className="section-card">
+              <h3 className="section-title">Project Details</h3>
+              <p className="section-content">
+                This is where you can add more project functionality like tasks, files, or other features.
+              </p>
+              <div className="section-actions">
+                <button className="btn btn-secondary">Add Photos</button>
+                <button className="btn btn-outline">Export Project</button>
+              </div>
+            </div>
+
+            <div className="section-card">
+              <h3 className="section-title">Recent Activity</h3>
+              <div className="activity-list">
+                <div className="activity-item">
+                  <div className="activity-icon">📸</div>
+                  <div className="activity-content">
+                    <span className="activity-text">Project created</span>
+                    <span className="activity-time">Just now</span>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       )}

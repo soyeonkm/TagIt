@@ -1,7 +1,7 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use reqwest::Client;
-use std::env;
+use crate::config::Config;
 
 // Data structures for Supabase operations
 #[derive(Debug, Serialize, Deserialize)]
@@ -42,19 +42,13 @@ pub struct SupabaseService {
 
 impl SupabaseService {
     pub fn new() -> Result<Self> {
-        dotenv::dotenv().ok();
-
-        let base_url = env::var("SUPABASE_URL")
-            .expect("SUPABASE_URL must be set");
-        let anon_key = env::var("SUPABASE_ANON_KEY")
-            .expect("SUPABASE_ANON_KEY must be set");
-
+        let config = Config::new();
         let client = Client::new();
 
         Ok(Self {
             client,
-            base_url,
-            anon_key,
+            base_url: config.supabase_url,
+            anon_key: config.supabase_anon_key,
         })
     }
 
@@ -239,6 +233,91 @@ impl SupabaseService {
         } else {
             let error_text = response.text().await?;
             Err(anyhow::anyhow!("Failed to delete project: {}", error_text))
+        }
+    }
+
+    // Get project by ID
+    pub async fn get_project_by_id(&self, project_id: &str, user_id: &str) -> Result<Option<Project>> {
+        let url = format!("{}/rest/v1/projects?id=eq.{}&user_id=eq.{}", self.base_url, project_id, user_id);
+
+        let response = self.client
+            .get(&url)
+            .header("apikey", &self.anon_key)
+            .header("Content-Type", "application/json")
+            .send()
+            .await?;
+
+        if response.status().is_success() {
+            let projects: Vec<Project> = response.json().await?;
+            Ok(projects.into_iter().next())
+        } else {
+            let error_text = response.text().await?;
+            Err(anyhow::anyhow!("Failed to get project: {}", error_text))
+        }
+    }
+
+    // Get profile by user ID
+    pub async fn get_profile(&self, user_id: &str) -> Result<Option<Profile>> {
+        let url = format!("{}/rest/v1/profiles?id=eq.{}", self.base_url, user_id);
+
+        let response = self.client
+            .get(&url)
+            .header("apikey", &self.anon_key)
+            .header("Content-Type", "application/json")
+            .send()
+            .await?;
+
+        if response.status().is_success() {
+            let profiles: Vec<Profile> = response.json().await?;
+            Ok(profiles.into_iter().next())
+        } else {
+            let error_text = response.text().await?;
+            Err(anyhow::anyhow!("Failed to get profile: {}", error_text))
+        }
+    }
+
+    // Password reset request
+    pub async fn reset_password(&self, email: &str) -> Result<()> {
+        let url = format!("{}/auth/v1/recover", self.base_url);
+
+        let response = self.client
+            .post(&url)
+            .header("apikey", &self.anon_key)
+            .header("Content-Type", "application/json")
+            .json(&serde_json::json!({
+                "email": email
+            }))
+            .send()
+            .await?;
+
+        if response.status().is_success() {
+            Ok(())
+        } else {
+            let error_text = response.text().await?;
+            Err(anyhow::anyhow!("Failed to send password reset: {}", error_text))
+        }
+    }
+
+    // Update password (for reset flow)
+    pub async fn update_password(&self, access_token: &str, new_password: &str) -> Result<()> {
+        let url = format!("{}/auth/v1/user", self.base_url);
+
+        let response = self.client
+            .put(&url)
+            .header("apikey", &self.anon_key)
+            .header("Authorization", &format!("Bearer {}", access_token))
+            .header("Content-Type", "application/json")
+            .json(&serde_json::json!({
+                "password": new_password
+            }))
+            .send()
+            .await?;
+
+        if response.status().is_success() {
+            Ok(())
+        } else {
+            let error_text = response.text().await?;
+            Err(anyhow::anyhow!("Failed to update password: {}", error_text))
         }
     }
 }
