@@ -439,6 +439,96 @@ async fn get_image_thumbnail(file_path: String, width: u32, height: u32, quality
     Ok(data_url)
 }
 
+// Tauri command for updating photo XMP metadata
+#[tauri::command]
+async fn update_photo_metadata(file_path: String, metadata: serde_json::Value) -> Result<serde_json::Value, String> {
+    use std::path::Path;
+
+    
+    println!("Updating metadata for file: {}", file_path);
+    println!("New metadata: {:?}", metadata);
+    
+    let path = Path::new(&file_path);
+    if !path.exists() {
+        return Err(format!("File not found: {}", file_path));
+    }
+    
+    // Extract metadata values from JSON
+    let title = metadata.get("title").and_then(|v| v.as_str()).unwrap_or("");
+    let description = metadata.get("description").and_then(|v| v.as_str()).unwrap_or("");
+    let keywords = metadata.get("keywords").and_then(|v| v.as_str()).unwrap_or("");
+    let creator = metadata.get("creator").and_then(|v| v.as_str()).unwrap_or("");
+    let copyright = metadata.get("copyright").and_then(|v| v.as_str()).unwrap_or("");
+    let rating = metadata.get("rating").and_then(|v| v.as_u64()).unwrap_or(0);
+    let color_label = metadata.get("colorLabel").and_then(|v| v.as_str()).unwrap_or("");
+    
+    // Create XMP metadata content
+    let mut xmp_content = String::new();
+    xmp_content.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+    xmp_content.push_str("<x:xmpmeta xmlns:x=\"adobe:ns:meta/\">\n");
+    xmp_content.push_str("  <rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">\n");
+    xmp_content.push_str("    <rdf:Description rdf:about=\"\"\n");
+    xmp_content.push_str("      xmlns:dc=\"http://purl.org/dc/elements/1.1/\"\n");
+    xmp_content.push_str("      xmlns:xmp=\"http://ns.adobe.com/xap/1.0/\">\n");
+    
+    // Add metadata fields
+    if !title.is_empty() {
+        xmp_content.push_str(&format!("      <dc:title>{}</dc:title>\n", title));
+    }
+    
+    if !description.is_empty() {
+        xmp_content.push_str(&format!("      <dc:description>{}</dc:description>\n", description));
+    }
+    
+    if !creator.is_empty() {
+        xmp_content.push_str(&format!("      <dc:creator>{}</dc:creator>\n", creator));
+    }
+    
+    if !keywords.is_empty() {
+        let keywords_list: Vec<&str> = keywords.split(',').map(|s| s.trim()).collect();
+        xmp_content.push_str("      <dc:subject>\n");
+        xmp_content.push_str("        <rdf:Bag>\n");
+        for keyword in keywords_list {
+            xmp_content.push_str(&format!("          <rdf:li>{}</rdf:li>\n", keyword));
+        }
+        xmp_content.push_str("        </rdf:Bag>\n");
+        xmp_content.push_str("      </dc:subject>\n");
+    }
+    
+    if !copyright.is_empty() {
+        xmp_content.push_str(&format!("      <dc:rights>{}</dc:rights>\n", copyright));
+    }
+    
+    if rating > 0 {
+        xmp_content.push_str(&format!("      <xmp:Rating>{}</xmp:Rating>\n", rating));
+    }
+    
+    if !color_label.is_empty() && color_label != "None" {
+        xmp_content.push_str(&format!("      <xmp:Label>{}</xmp:Label>\n", color_label));
+    }
+    
+    // Close XML tags
+    xmp_content.push_str("    </rdf:Description>\n");
+    xmp_content.push_str("  </rdf:RDF>\n");
+    xmp_content.push_str("</x:xmpmeta>\n");
+    
+    // Create XMP sidecar file path
+    let xmp_path = path.with_extension("xmp");
+    
+    // Write XMP metadata to sidecar file
+    fs::write(&xmp_path, xmp_content).map_err(|e| format!("Failed to write XMP file: {}", e))?;
+    
+    println!("XMP metadata written to: {:?}", xmp_path);
+    
+    // Return success response
+    let mut response = serde_json::Map::new();
+    response.insert("success".to_string(), serde_json::Value::Bool(true));
+    response.insert("message".to_string(), serde_json::Value::String("XMP metadata file created successfully".to_string()));
+    response.insert("xmpPath".to_string(), serde_json::Value::String(xmp_path.to_string_lossy().to_string()));
+    
+    Ok(serde_json::Value::Object(response))
+}
+
 // Keep the original greet command for testing
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -467,7 +557,8 @@ pub fn run() {
             select_folder_with_info,
             read_project_folder,
             get_image_data_url,
-            get_image_thumbnail
+            get_image_thumbnail,
+            update_photo_metadata
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
