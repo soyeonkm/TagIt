@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { tauriSupabase } from '../tauriClient'
 import { useAuth } from '../contexts/AuthContext'
@@ -14,7 +14,159 @@ function Project() {
   const [photosLoading, setPhotosLoading] = useState(false)
   const [selectedPhoto, setSelectedPhoto] = useState(null)
   const [metadataPanelOpen, setMetadataPanelOpen] = useState(false)
+  
+  // Add/remove body class when metadata panel opens/closes
+  useEffect(() => {
+    console.log('Metadata panel state changed:', metadataPanelOpen)
+    if (metadataPanelOpen) {
+      document.body.classList.add('panel-open')
+      console.log('Added panel-open class to body')
+      console.log('Body classes:', document.body.className)
+      
+      // Check if the photo grid exists and log its current styles
+      setTimeout(() => {
+        const photoGrid = document.querySelector('.photo-grid')
+        if (photoGrid) {
+          const computedStyle = window.getComputedStyle(photoGrid)
+          console.log('Photo grid computed styles:', {
+            marginRight: computedStyle.marginRight,
+            width: computedStyle.width,
+            maxWidth: computedStyle.maxWidth
+          })
+        }
+      }, 100)
+    } else {
+      document.body.classList.remove('panel-open')
+      console.log('Removed panel-open class from body')
+      console.log('Body classes:', document.body.className)
+    }
+    
+    // Cleanup function to remove class when component unmounts
+    return () => {
+      document.body.classList.remove('panel-open')
+      console.log('Cleanup: removed panel-open class from body')
+    }
+  }, [metadataPanelOpen])
+  
+  // Lazy loading states
+  const [allPhotos, setAllPhotos] = useState([]) // All photos from folder
+  const [visiblePhotos, setVisiblePhotos] = useState([]) // Currently visible photos
+  const [loadedChunks, setLoadedChunks] = useState(new Set()) // Track loaded chunks
+  const [currentChunk, setCurrentChunk] = useState(0)
+  const [isLoadingMore, setIsLoadingMore] = useState(false)
+  
+  // Image thumbnail cache
+  const [thumbnailCache, setThumbnailCache] = useState(new Map())
+  const [loadingThumbnails, setLoadingThumbnails] = useState(new Set())
+  
+  // Refs for intersection observer
+  const photoGridRef = useRef(null)
+  const sentinelRef = useRef(null)
+  
   const { user, isDevelopment, getMockProject, accessToken } = useAuth()
+
+  // Constants for chunking
+  const PHOTOS_PER_CHUNK = 5
+  const PRELOAD_CHUNKS = 2 // Preload next 2 chunks
+
+  // Load and cache image thumbnail
+  const loadThumbnail = useCallback(async (photo) => {
+    if (thumbnailCache.has(photo.id) || loadingThumbnails.has(photo.id)) {
+      return
+    }
+
+    setLoadingThumbnails(prev => new Set([...prev, photo.id]))
+
+    try {
+      if (isDevelopment) {
+        // For development, create a mock thumbnail
+        const canvas = document.createElement('canvas')
+        const ctx = canvas.getContext('2d')
+        canvas.width = 200
+        canvas.height = 150
+        
+        // Create a gradient background
+        const gradient = ctx.createLinearGradient(0, 0, 200, 150)
+        gradient.addColorStop(0, '#667eea')
+        gradient.addColorStop(1, '#764ba2')
+        ctx.fillStyle = gradient
+        ctx.fillRect(0, 0, 200, 150)
+        
+        // Add text
+        ctx.fillStyle = 'white'
+        ctx.font = 'bold 16px Arial'
+        ctx.textAlign = 'center'
+        ctx.fillText(photo.name.split('.')[0], 100, 80)
+        ctx.font = '12px Arial'
+        ctx.fillText(photo.size, 100, 100)
+        
+        const thumbnailUrl = canvas.toDataURL('image/jpeg', 0.8)
+        
+        setThumbnailCache(prev => new Map(prev).set(photo.id, thumbnailUrl))
+      } else {
+        // For production, load actual image thumbnail
+        const { invoke } = await import('@tauri-apps/api/core')
+        
+        try {
+          const thumbnailData = await invoke('get_image_thumbnail', {
+            filePath: photo.path,
+            width: 200,
+            height: 150,
+            quality: 80
+          })
+          
+          if (thumbnailData) {
+            setThumbnailCache(prev => new Map(prev).set(photo.id, thumbnailData))
+          }
+        } catch (error) {
+          console.warn(`Failed to load thumbnail for ${photo.name}:`, error)
+          // Fallback to placeholder
+          const fallbackUrl = createFallbackThumbnail(photo)
+          setThumbnailCache(prev => new Map(prev).set(photo.id, fallbackUrl))
+        }
+      }
+    } catch (error) {
+      console.error(`Error loading thumbnail for ${photo.name}:`, error)
+      // Fallback to placeholder
+      const fallbackUrl = createFallbackThumbnail(photo)
+      setThumbnailCache(prev => new Map(prev).set(photo.id, fallbackUrl))
+    } finally {
+      setLoadingThumbnails(prev => {
+        const newSet = new Set(prev)
+        newSet.delete(photo.id)
+        return newSet
+      })
+    }
+  }, [isDevelopment, thumbnailCache, loadingThumbnails])
+
+  // Create fallback thumbnail
+  const createFallbackThumbnail = useCallback((photo) => {
+    const canvas = document.createElement('canvas')
+    const ctx = canvas.getContext('2d')
+    canvas.width = 200
+    canvas.height = 150
+    
+    // Create a gradient background
+    const gradient = ctx.createLinearGradient(0, 0, 200, 150)
+    gradient.addColorStop(0, '#e5e7eb')
+    gradient.addColorStop(1, '#d1d5db')
+    ctx.fillStyle = gradient
+    ctx.fillRect(0, 0, 200, 150)
+    
+    // Add camera icon
+    ctx.fillStyle = '#9ca3af'
+    ctx.font = '48px Arial'
+    ctx.textAlign = 'center'
+    ctx.fillText('📷', 100, 70)
+    
+    // Add filename
+    ctx.fillStyle = '#6b7280'
+    ctx.font = 'bold 12px Arial'
+    ctx.textAlign = 'center'
+    ctx.fillText(photo.name.split('.')[0].substring(0, 15), 100, 100)
+    
+    return canvas.toDataURL('image/jpeg', 0.8)
+  }, [])
 
   useEffect(() => {
     if (id) {
@@ -24,60 +176,152 @@ function Project() {
     }
   }, [id])
 
+  // Intersection observer for lazy loading
+  useEffect(() => {
+    if (!sentinelRef.current) return
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting && !isLoadingMore && allPhotos.length > 0) {
+            loadNextChunk()
+          }
+        })
+      },
+      { threshold: 0.1 }
+    )
+
+    observer.observe(sentinelRef.current)
+    return () => observer.disconnect()
+  }, [allPhotos, isLoadingMore])
+
+  // Load next chunk of photos
+  const loadNextChunk = useCallback(async () => {
+    if (isLoadingMore || currentChunk * PHOTOS_PER_CHUNK >= allPhotos.length) return
+
+    setIsLoadingMore(true)
+    
+    // Simulate loading delay for better UX
+    await new Promise(resolve => setTimeout(resolve, 300))
+    
+    const startIndex = currentChunk * PHOTOS_PER_CHUNK
+    const endIndex = Math.min(startIndex + PHOTOS_PER_CHUNK, allPhotos.length)
+    
+    const newPhotos = allPhotos.slice(startIndex, endIndex)
+    
+    // Update visible photos with new chunk
+    setVisiblePhotos(prev => [...prev, ...newPhotos])
+    setLoadedChunks(prev => new Set([...prev, currentChunk]))
+    setCurrentChunk(prev => prev + 1)
+    
+    // Load thumbnails for new photos
+    newPhotos.forEach(photo => {
+      if (!thumbnailCache.has(photo.id)) {
+        loadThumbnail(photo)
+      }
+    })
+    
+    // Preload thumbnails for next chunk (if available)
+    const nextChunkStart = (currentChunk + 1) * PHOTOS_PER_CHUNK
+    const nextChunkEnd = Math.min(nextChunkStart + PHOTOS_PER_CHUNK, allPhotos.length)
+    if (nextChunkStart < allPhotos.length) {
+      const nextChunkPhotos = allPhotos.slice(nextChunkStart, nextChunkEnd)
+      nextChunkPhotos.forEach(photo => {
+        if (!thumbnailCache.has(photo.id) && !loadingThumbnails.has(photo.id)) {
+          // Preload in background without blocking UI
+          setTimeout(() => loadThumbnail(photo), 100)
+        }
+      })
+    }
+    
+    // Add a small delay to show the loading state
+    await new Promise(resolve => setTimeout(resolve, 100))
+    setIsLoadingMore(false)
+  }, [currentChunk, allPhotos, isLoadingMore, visiblePhotos.length, thumbnailCache, loadThumbnail, loadingThumbnails])
+
+  // Reset photo loading when project changes
+  useEffect(() => {
+    if (project && project.folder_path) {
+      setVisiblePhotos([])
+      setLoadedChunks(new Set())
+      setCurrentChunk(0)
+    }
+  }, [project?.folder_path])
+
   const fetchProject = async () => {
+    console.log('🔄 fetchProject called with id:', id)
+    console.log('🔄 isDevelopment:', isDevelopment)
+    console.log('🔄 user:', user)
+    
     try {
       if (isDevelopment) {
+        console.log('🔄 Using development mode')
         // Use mock data in development mode
         if (!user) {
+          console.log('❌ No user found in development mode')
           setError('User not authenticated')
           setLoading(false)
           return
         }
 
+        console.log('🔄 Getting mock project for id:', id)
         const { data, error } = await getMockProject(id)
+        console.log('🔄 Mock project result:', { data, error })
         
         if (error) {
+          console.log('❌ Mock project error:', error)
           setError('Project not found')
         } else {
+          console.log('✅ Mock project loaded:', data)
           setProject(data)
           
           // Load photos after setting project
           if (data && data.folder_path) {
+            console.log('🔄 Loading photos from folder:', data.folder_path)
             loadPhotosFromFolder(data);
+          } else {
+            console.log('⚠️ No folder_path in mock project')
           }
         }
       } else {
+        console.log('🔄 Using production mode')
         // Use Tauri backend
         try {
           // Use the Tauri invoke command directly instead of tauriSupabase
           const { invoke } = await import('@tauri-apps/api/core');
+          console.log('🔄 Invoking get_project_by_id with:', { projectId: id, userId: user.id })
           const projectData = await invoke('get_project_by_id', { 
             projectId: id, 
             userId: user.id, 
             accessToken: accessToken
           });
           
+          console.log('🔄 Backend project data:', projectData)
+          
           if (projectData) {
             setProject(projectData);
             
             // Load photos after setting project
             if (projectData && projectData.folder_path) {
+              console.log('🔄 Loading photos from folder:', projectData.folder_path)
               loadPhotosFromFolder(projectData);
             } else {
-              console.log('No folder_path found, photos will not be loaded automatically');
+              console.log('⚠️ No folder_path found, photos will not be loaded automatically');
             }
           } else {
+            console.log('❌ No project data returned from backend')
             setError('Project not found');
           }
         } catch (invokeError) {
-          console.error('Tauri invoke error:', invokeError);
+          console.error('❌ Tauri invoke error:', invokeError);
           setError('Failed to load project from backend');
         }
       }
     } catch (error) {
-      console.error('Error:', error)
+      console.error('❌ General error in fetchProject:', error)
       setError('Failed to load project')
     } finally {
+      console.log('🔄 Setting loading to false')
       setLoading(false)
     }
   }
@@ -91,6 +335,8 @@ function Project() {
     
     if (!targetProject.folder_path) {
       setPhotos([]);
+      setAllPhotos([]);
+      setVisiblePhotos([]);
       setPhotosLoading(false);
       return;
     }
@@ -130,21 +376,49 @@ function Project() {
           }
         ];
         
-        setPhotos(mockPhotos);
-        console.log('Mock photos loaded:', mockPhotos.length);
-        return mockPhotos;
+        // For development, create more mock photos to test chunking
+        const extendedMockPhotos = [...mockPhotos];
+        for (let i = 4; i <= 50; i++) {
+          extendedMockPhotos.push({
+            id: i,
+            name: `photo${i}.jpg`,
+            path: targetProject.folder_path + `/photo${i}.jpg`,
+            size: `${(Math.random() * 5 + 1).toFixed(1)} MB`,
+            dimensions: `${1920 + Math.floor(Math.random() * 1000)}x${1080 + Math.floor(Math.random() * 500)}`,
+            dateModified: new Date(Date.now() - Math.random() * 86400000 * 30).toISOString(),
+            type: 'image/jpeg'
+          });
+        }
+        
+        setAllPhotos(extendedMockPhotos);
+        setPhotos(extendedMockPhotos);
+        
+        // Load first chunk
+        const firstChunk = extendedMockPhotos.slice(0, PHOTOS_PER_CHUNK);
+        setVisiblePhotos(firstChunk);
+        setLoadedChunks(new Set([0]));
+        setCurrentChunk(1);
+        
+        // Load thumbnails for first chunk
+        firstChunk.forEach(photo => {
+          loadThumbnail(photo);
+        });
+        
+        console.log('Mock photos loaded:', extendedMockPhotos.length);
+        return extendedMockPhotos;
       } else {
         // Use Tauri backend to read folder contents
         const { invoke } = await import('@tauri-apps/api/core');
         
-        console.log('Loading photos from folder:', targetProject.folder_path);
+        console.log('🔄 Loading photos from folder:', targetProject.folder_path);
         const folderPhotos = await invoke('read_project_folder', { 
           projectId: targetProject.id,
           folderPath: targetProject.folder_path,
           accessToken: accessToken
         });
         
-        console.log('Backend returned photos:', folderPhotos);
+        console.log('📸 Backend returned photos:', folderPhotos);
+        console.log('📊 Photo count from backend:', folderPhotos ? folderPhotos.length : 0);
         
         // Convert the backend data format to match frontend expectations
         const processedPhotos = folderPhotos.map(photo => ({
@@ -153,8 +427,22 @@ function Project() {
           dimensions: photo.dimensions || 'Unknown' // Ensure dimensions field exists
         }));
         
-        console.log('Processed photos:', processedPhotos);
+        console.log('✅ Processed photos:', processedPhotos);
+        console.log('📊 Final photo count:', processedPhotos.length);
+        
+        setAllPhotos(processedPhotos || []);
         setPhotos(processedPhotos || []);
+        
+        // Load first chunk
+        const firstChunk = (processedPhotos || []).slice(0, PHOTOS_PER_CHUNK);
+        setVisiblePhotos(firstChunk);
+        setLoadedChunks(new Set([0]));
+        setCurrentChunk(1);
+        
+        // Load thumbnails for first chunk
+        firstChunk.forEach(photo => {
+          loadThumbnail(photo);
+        });
         
         // Return the processed photos for external use
         return processedPhotos || [];
@@ -162,10 +450,34 @@ function Project() {
     } catch (error) {
       console.error('❌ Error loading photos:', error);
       setPhotos([]);
+      setAllPhotos([]);
+      setVisiblePhotos([]);
       return []; // Return empty array on error
     } finally {
       setPhotosLoading(false);
     }
+  }
+
+  // Function to load data URLs for local images
+  const loadImageDataUrls = async (photoList) => {
+    if (isDevelopment) return; // Skip for development mode
+    
+    const { invoke } = await import('@tauri-apps/api/core');
+    const newDataUrls = {};
+    
+    for (const photo of photoList) {
+      try {
+        const dataUrl = await invoke('get_image_data_url', { 
+          filePath: photo.path 
+        });
+        newDataUrls[photo.id] = dataUrl;
+      } catch (error) {
+        console.error(`Failed to load image data URL for ${photo.name}:`, error);
+        // Keep the placeholder for failed images
+      }
+    }
+    
+    // setPhotoDataUrls(prev => ({ ...prev, ...newDataUrls })); // This state is no longer needed
   }
 
   const handlePhotoClick = (photo) => {
@@ -307,8 +619,8 @@ function Project() {
   }
 
   return (
-    <div className="project-container">
-      <div className="project-header">
+          <div className="project-container">
+        <div className="project-header">
         <button
           onClick={() => navigate('/dashboard')}
           className="back-button"
@@ -414,10 +726,24 @@ function Project() {
                   📁 Current folder: {project.folder_path}
                 </div>
               )}
-              {/* Debug info */}
-              <div style={{fontSize: '12px', color: '#666', marginTop: '5px'}}>
-                Photos loaded: {photos.length} | Loading: {photosLoading.toString()}
-              </div>
+              
+              {/* Chunk loading progress bar */}
+              {allPhotos.length > 0 && (
+                <div className="chunk-progress" style={{marginTop: '10px'}}>
+                  <div className="progress-bar">
+                    <div 
+                      className="progress-fill" 
+                      style={{
+                        width: `${(thumbnailCache.size / allPhotos.length) * 100}%`,
+                        transition: 'width 0.3s ease'
+                      }}
+                    ></div>
+                  </div>
+                  <div className="progress-text">
+                    {Math.round((thumbnailCache.size / allPhotos.length) * 100)}% loaded
+                  </div>
+                </div>
+              )}
             </div>
 
             {photosLoading ? (
@@ -425,25 +751,116 @@ function Project() {
                 <div className="loading-spinner"></div>
                 <p>Loading photos from folder...</p>
               </div>
-            ) : photos.length > 0 ? (
-              <div className="photo-grid">
-                {photos.map((photo) => (
-                  <div 
-                    key={photo.id} 
-                    className="photo-item"
-                    onClick={() => handlePhotoClick(photo)}
-                  >
-                    <div className="photo-thumbnail">
-                      <div className="photo-placeholder">
-                        <span className="photo-icon">📷</span>
+            ) : allPhotos.length > 0 ? (
+              <div className={`photo-grid-section ${metadataPanelOpen ? 'panel-open' : ''}`}>
+                <div className="photo-grid" ref={photoGridRef}>
+                  {visiblePhotos.map((photo, index) => {
+                    const chunkNumber = Math.floor(index / PHOTOS_PER_CHUNK);
+                    const thumbnailUrl = thumbnailCache.get(photo.id);
+                    const isLoadingThumbnail = loadingThumbnails.has(photo.id);
+                    
+                    return (
+                      <div 
+                        key={photo.id} 
+                        className="photo-item"
+                        onClick={() => handlePhotoClick(photo)}
+                        title={`Photo ${index + 1} of ${allPhotos.length}`}
+                      >
+                        <div className="photo-thumbnail">
+                          {thumbnailUrl ? (
+                            <img 
+                              src={thumbnailUrl} 
+                              alt={photo.name}
+                              className="photo-thumbnail-image"
+                              loading="lazy"
+                            />
+                          ) : isLoadingThumbnail ? (
+                            <div className="photo-placeholder loading">
+                              <div className="loading-spinner-small"></div>
+                              <span className="loading-text">Loading...</span>
+                            </div>
+                          ) : (
+                            <div className="photo-placeholder">
+                              <span className="photo-icon">📷</span>
+                            </div>
+                          )}
+                        </div>
+                        <div className="photo-info">
+                          <span className="photo-name">{photo.name}</span>
+                          <span className="photo-size">{photo.size}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  
+                  {/* Loading sentinel for intersection observer */}
+                  {visiblePhotos.length < allPhotos.length && (
+                    <div 
+                      ref={sentinelRef}
+                      className="loading-sentinel"
+                      style={{ 
+                        width: '100%', 
+                        height: '20px', 
+                        display: 'flex', 
+                        alignItems: 'center', 
+                        justifyContent: 'center',
+                        color: '#666',
+                        fontSize: '14px'
+                      }}
+                    >
+                      {isLoadingMore ? (
+                        <span>🔄 Loading more photos...</span>
+                      ) : (
+                        <span>⬇️ Scroll to load more photos</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+                
+                {/* Metadata Panel - Floating within photo grid section */}
+                {metadataPanelOpen && selectedPhoto && (
+                  <div className="metadata-sliding-panel">
+                    <div className="metadata-panel-header">
+                      <h3>Photo Metadata</h3>
+                      <button 
+                        onClick={closeMetadataPanel}
+                        className="close-button"
+                      >
+                        ×
+                      </button>
+                    </div>
+                    <div className="metadata-panel-content">
+                      <div className="metadata-details">
+                        <div className="metadata-row">
+                          <span className="metadata-label">Filename:</span>
+                          <span className="metadata-value">{selectedPhoto.name}</span>
+                        </div>
+                        <div className="metadata-row">
+                          <span className="metadata-label">File Size:</span>
+                          <span className="metadata-value">{selectedPhoto.size}</span>
+                        </div>
+                        <div className="metadata-row">
+                          <span className="metadata-label">Dimensions:</span>
+                          <span className="metadata-value">{selectedPhoto.dimensions}</span>
+                        </div>
+                        <div className="metadata-row">
+                          <span className="metadata-label">Type:</span>
+                          <span className="metadata-value">{selectedPhoto.type}</span>
+                        </div>
+                        <div className="metadata-row">
+                          <span className="metadata-label">Modified:</span>
+                          <span className="metadata-value">
+                            {new Date(selectedPhoto.dateModified).toLocaleString()}
+                          </span>
+                        </div>
+                        <div className="metadata-row">
+                          <span className="metadata-label">Path:</span>
+                          <span className="metadata-value path-value">{selectedPhoto.path}</span>
+                        </div>
                       </div>
                     </div>
-                    <div className="photo-info">
-                      <span className="photo-name">{photo.name}</span>
-                      <span className="photo-size">{photo.size}</span>
-                    </div>
                   </div>
-                ))}
+                )}
               </div>
             ) : (
               <div className="empty-photos">
@@ -467,57 +884,7 @@ function Project() {
         </div>
       )}
 
-      {/* Metadata Panel Overlay */}
-      {metadataPanelOpen && selectedPhoto && (
-        <div className="metadata-overlay" onClick={closeMetadataPanel}>
-          <div className="metadata-panel" onClick={(e) => e.stopPropagation()}>
-            <div className="metadata-header">
-              <h3>Photo Metadata</h3>
-              <button 
-                onClick={closeMetadataPanel}
-                className="close-button"
-              >
-                ×
-              </button>
-            </div>
-            <div className="metadata-content">
-              <div className="photo-preview">
-                <div className="photo-placeholder-large">
-                  <span className="photo-icon-large">📷</span>
-                </div>
-              </div>
-              <div className="metadata-details">
-                <div className="metadata-row">
-                  <span className="metadata-label">Filename:</span>
-                  <span className="metadata-value">{selectedPhoto.name}</span>
-                </div>
-                <div className="metadata-row">
-                  <span className="metadata-label">File Size:</span>
-                  <span className="metadata-value">{selectedPhoto.size}</span>
-                </div>
-                <div className="metadata-row">
-                  <span className="metadata-label">Dimensions:</span>
-                  <span className="metadata-value">{selectedPhoto.dimensions}</span>
-                </div>
-                <div className="metadata-row">
-                  <span className="metadata-label">Type:</span>
-                  <span className="metadata-value">{selectedPhoto.type}</span>
-                </div>
-                <div className="metadata-row">
-                  <span className="metadata-label">Modified:</span>
-                  <span className="metadata-value">
-                    {new Date(selectedPhoto.dateModified).toLocaleString()}
-                  </span>
-                </div>
-                <div className="metadata-row">
-                  <span className="metadata-label">Path:</span>
-                  <span className="metadata-value path-value">{selectedPhoto.path}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+
     </div>
   )
 }

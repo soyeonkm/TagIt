@@ -1,12 +1,13 @@
 mod config;
 mod supabase;
 
-use supabase::{SupabaseService, AuthUser, Profile, Project, CreateProjectRequest};
-// use serde::{Deserialize, Serialize};
 use anyhow::Result;
-use std::path::PathBuf;
 use std::fs;
+use std::path::PathBuf;
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use rfd::FileDialog;
+
+use supabase::{SupabaseService, AuthUser, Profile, Project, CreateProjectRequest};
 
 
 // Tauri commands for authentication
@@ -164,7 +165,7 @@ async fn select_folder_with_info() -> Result<serde_json::Value, String> {
 
 // Command to read photos from a project folder
 #[tauri::command]
-async fn read_project_folder(project_id: String, folder_path: String, access_token: String) -> Result<Vec<serde_json::Value>, String> {
+async fn read_project_folder(_project_id: String, folder_path: String, _access_token: String) -> Result<Vec<serde_json::Value>, String> {
     // Validate the folder path exists and is accessible
     let path = PathBuf::from(&folder_path);
     if !path.exists() {
@@ -180,37 +181,262 @@ async fn read_project_folder(project_id: String, folder_path: String, access_tok
         .map_err(|e| format!("Failed to read directory: {}", e))?;
 
     let mut photos = Vec::new();
+    let mut total_files = 0;
+    let mut image_files = 0;
+    let mut skipped_files = 0;
     
     for entry in entries {
         if let Ok(entry) = entry {
             let file_path = entry.path();
+            total_files += 1;
             
-            // Check if it's an image file
+            // Skip hidden files and system files
+            if let Some(file_name) = file_path.file_name() {
+                let name = file_name.to_string_lossy();
+                if name.starts_with('.') || name.starts_with('~') || name == "Thumbs.db" || name == "desktop.ini" {
+                    skipped_files += 1;
+                    continue;
+                }
+            }
+            
+            // Check if it's an image file - expanded list of extensions
             if let Some(extension) = file_path.extension() {
                 let ext = extension.to_string_lossy().to_lowercase();
-                if matches!(ext.as_str(), "jpg" | "jpeg" | "png" | "gif" | "bmp" | "webp" | "tiff") {
+                if matches!(ext.as_str(), 
+                    "jpg" | "jpeg" | "png" | "gif" | "bmp" | "webp" | "tiff" | "tif" |
+                    "heic" | "heif" | "raw" | "cr2" | "nef" | "arw" | "dng" | "orf" |
+                    "JPG" | "JPEG" | "PNG" | "GIF" | "BMP" | "WEBP" | "TIFF" | "TIF" |
+                    "HEIC" | "HEIF" | "RAW" | "CR2" | "NEF" | "ARW" | "DNG" | "ORF"
+                ) {
+                    image_files += 1;
+                    
                     // Get file metadata
-                    if let Ok(metadata) = fs::metadata(&file_path) {
-                        let photo_info = serde_json::json!({
-                            "id": file_path.file_name().unwrap_or_default().to_string_lossy(),
-                            "name": file_path.file_name().unwrap_or_default().to_string_lossy(),
-                            "path": file_path.to_string_lossy(),
-                            "size": format!("{:.1} MB", metadata.len() as f64 / 1024.0 / 1024.0),
-                            "dimensions": "Unknown", // Would need image processing library to get actual dimensions
-                            "dateModified": metadata.modified()
-                                .map(|t| t.duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs())
-                                .unwrap_or(0),
-                            "type": format!("image/{}", ext)
-                        });
-                        
-                        photos.push(photo_info);
+                    match fs::metadata(&file_path) {
+                        Ok(metadata) => {
+                            let photo_info = serde_json::json!({
+                                "id": file_path.file_name().unwrap_or_default().to_string_lossy(),
+                                "name": file_path.file_name().unwrap_or_default().to_string_lossy(),
+                                "path": file_path.to_string_lossy(),
+                                "size": format!("{:.1} MB", metadata.len() as f64 / 1024.0 / 1024.0),
+                                "dimensions": "Unknown", // Would need image processing library to get actual dimensions
+                                "dateModified": metadata.modified()
+                                    .map(|t| t.duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs())
+                                    .unwrap_or(0),
+                                "type": format!("image/{}", ext.to_lowercase())
+                            });
+                            
+                            photos.push(photo_info);
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to read metadata for {}: {}", file_path.display(), e);
+                            skipped_files += 1;
+                        }
                     }
+                } else {
+                    skipped_files += 1;
                 }
+            } else {
+                // Files without extensions
+                skipped_files += 1;
             }
         }
     }
 
+    // Log summary for debugging
+    eprintln!("Folder scan complete: {} total files, {} image files, {} skipped", total_files, image_files, skipped_files);
+
     Ok(photos)
+}
+
+// Command to convert local image file to data URL for display
+#[tauri::command]
+async fn get_image_data_url(file_path: String) -> Result<String, String> {
+    let path = PathBuf::from(&file_path);
+    
+    // Validate the file exists and is an image
+    if !path.exists() {
+        return Err("File does not exist".to_string());
+    }
+    
+    if !path.is_file() {
+        return Err("Path is not a file".to_string());
+    }
+    
+    // Check if it's an image file
+    if let Some(extension) = path.extension() {
+        let ext = extension.to_string_lossy().to_lowercase();
+        if !matches!(ext.as_str(), "jpg" | "jpeg" | "png" | "gif" | "bmp" | "webp" | "tiff") {
+            return Err("File is not a supported image format".to_string());
+        }
+    } else {
+        return Err("File has no extension".to_string());
+    }
+    
+    // Read the file and convert to base64
+    let file_bytes = fs::read(&path)
+        .map_err(|e| format!("Failed to read file: {}", e))?;
+    
+    // Determine MIME type based on extension
+    let mime_type = if let Some(extension) = path.extension() {
+        let ext = extension.to_string_lossy().to_lowercase();
+        match ext.as_str() {
+            "jpg" | "jpeg" => "image/jpeg",
+            "png" => "image/png",
+            "gif" => "image/gif",
+            "bmp" => "image/bmp",
+            "webp" => "image/webp",
+            "tiff" => "image/tiff",
+            _ => "image/jpeg"
+        }
+    } else {
+        "image/jpeg"
+    };
+    
+    // Convert to base64 and create data URL
+    let base64_string = BASE64.encode(&file_bytes);
+    let data_url = format!("data:{};base64,{}", mime_type, base64_string);
+    
+    Ok(data_url)
+}
+
+#[tauri::command]
+async fn get_image_thumbnail(file_path: String, width: u32, height: u32, quality: u8) -> Result<String, String> {
+    use std::fs::File;
+    use std::io::BufReader;
+    use image::io::Reader as ImageReader;
+    use base64::{Engine as _, engine::general_purpose};
+    use std::path::Path;
+    
+    // Read the image file
+    let file = File::open(&file_path).map_err(|e| format!("Failed to open file: {}", e))?;
+    let reader = BufReader::new(file);
+    
+    // Get file extension to determine format
+    let path = Path::new(&file_path);
+    let extension = path.extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+    
+    // Decode the image based on format
+    let img = match extension.as_str() {
+        "heic" | "heif" => {
+            // For HEIC files, just create a simple camera icon thumbnail
+            let mut fallback = image::RgbImage::new(width, height);
+            
+            // Fill with a light gray background
+            for y in 0..height {
+                for x in 0..width {
+                    fallback.put_pixel(x, y, image::Rgb([240, 240, 240]));
+                }
+            }
+            
+            // Create a simple camera icon (basic geometric shapes)
+            let center_x = width / 2;
+            let center_y = height / 2;
+            let icon_size = std::cmp::min(width, height) / 3;
+            
+            // Camera body (rectangle)
+            let body_width = icon_size;
+            let body_height = icon_size * 3 / 4;
+            let body_x = center_x - body_width / 2;
+            let body_y = center_y - body_height / 2;
+            
+            for y in body_y..body_y + body_height {
+                for x in body_x..body_x + body_width {
+                    if x < width && y < height {
+                        fallback.put_pixel(x, y, image::Rgb([100, 100, 100]));
+                    }
+                }
+            }
+            
+            // Camera lens (circle approximation)
+            let lens_radius = icon_size / 4;
+            for y in center_y - lens_radius..center_y + lens_radius {
+                for x in center_x - lens_radius..center_x + lens_radius {
+                    let dx = x as i32 - center_x as i32;
+                    let dy = y as i32 - center_y as i32;
+                    let distance_squared = dx * dx + dy * dy;
+                    if distance_squared <= (lens_radius * lens_radius) as i32 && x < width && y < height {
+                        fallback.put_pixel(x, y, image::Rgb([50, 50, 50]));
+                    }
+                }
+            }
+            
+            image::DynamicImage::ImageRgb8(fallback)
+        },
+        "cr3" | "nef" | "arw" | "dng" | "raf" | "orf" | "rw2" => {
+            // Handle RAW formats
+            let raw_data = rawloader::decode_file(&file_path)
+                .map_err(|e| format!("Failed to decode RAW file: {}", e))?;
+            
+            // Convert to RGB
+            let mut rgb_image = image::RgbImage::new(
+                raw_data.width.try_into().unwrap_or(200), 
+                raw_data.height.try_into().unwrap_or(150)
+            );
+            
+            // Handle different RAW data formats
+            match raw_data.data {
+                rawloader::RawImageData::Integer(data) => {
+                    for (i, pixel) in data.chunks(3).enumerate() {
+                        if pixel.len() == 3 {
+                            let x = i % rgb_image.width() as usize;
+                            let y = i / rgb_image.width() as usize;
+                            if x < rgb_image.width() as usize && y < rgb_image.height() as usize {
+                                rgb_image.put_pixel(x as u32, y as u32, image::Rgb([pixel[0] as u8, pixel[1] as u8, pixel[2] as u8]));
+                            }
+                        }
+                    }
+                },
+                rawloader::RawImageData::Float(data) => {
+                    for (i, pixel) in data.chunks(3).enumerate() {
+                        if pixel.len() == 3 {
+                            let x = i % rgb_image.width() as usize;
+                            let y = i / rgb_image.width() as usize;
+                            if x < rgb_image.width() as usize && y < rgb_image.height() as usize {
+                                let r = (pixel[0] * 255.0).clamp(0.0, 255.0) as u8;
+                                let g = (pixel[1] * 255.0).clamp(0.0, 255.0) as u8;
+                                let b = (pixel[2] * 255.0).clamp(0.0, 255.0) as u8;
+                                rgb_image.put_pixel(x as u32, y as u32, image::Rgb([r, g, b]));
+                            }
+                        }
+                    }
+                }
+            }
+            
+            image::DynamicImage::ImageRgb8(rgb_image)
+        },
+        _ => {
+            // Handle standard formats (JPEG, PNG, etc.)
+            ImageReader::new(reader)
+                .with_guessed_format()
+                .map_err(|e| format!("Failed to guess format: {}", e))?
+                .decode()
+                .map_err(|e| format!("Failed to decode image: {}", e))?
+        }
+    };
+    
+    // Resize the image to thumbnail dimensions
+    let thumbnail = img.resize(width, height, image::imageops::FilterType::Lanczos3);
+    
+    // Convert to RGB8 if needed
+    let rgb_thumbnail = thumbnail.to_rgb8();
+    
+    // Encode to JPEG with specified quality
+    let mut output = Vec::new();
+    let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut output, quality);
+    
+    // Use the actual dimensions from the resized image
+    let (actual_width, actual_height) = rgb_thumbnail.dimensions();
+    encoder.encode(&rgb_thumbnail, actual_width, actual_height, image::ColorType::Rgb8)
+        .map_err(|e| format!("Failed to encode thumbnail: {}", e))?;
+    
+    // Convert to base64
+    let base64_string = general_purpose::STANDARD.encode(&output);
+    let data_url = format!("data:image/jpeg;base64,{}", base64_string);
+    
+    Ok(data_url)
 }
 
 // Keep the original greet command for testing
@@ -239,7 +465,9 @@ pub fn run() {
             update_password,
             select_folder,
             select_folder_with_info,
-            read_project_folder
+            read_project_folder,
+            get_image_data_url,
+            get_image_thumbnail
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
