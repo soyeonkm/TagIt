@@ -64,14 +64,14 @@ function Home() {
                 alt="Football player running"
                 className="hero-image"
               />
-              <div className="floating-card card-1">
+              {/* <div className="floating-card card-1">
                 <div className="card-icon">🔍</div>
                 <div className="card-text">Jersey Number Detection</div>
               </div>
               <div className="floating-card card-2">
                 <div className="card-icon">🏈</div>
                 <div className="card-text">Player Name Detection</div>
-              </div>
+              </div> */}
             </div>
           </div>
         </div>

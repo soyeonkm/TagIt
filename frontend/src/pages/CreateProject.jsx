@@ -5,7 +5,7 @@ import { tauriSupabase, tauriUtils } from '../tauriClient';
 
 function CreateProject() {
   const navigate = useNavigate();
-  const { user, accessToken } = useAuth();
+  const { user, isDevelopment, createMockProject, accessToken } = useAuth()
   
   console.log('Debug - CreateProject component - user:', user); // Debug log
   console.log('Debug - CreateProject component - accessToken:', accessToken); // Debug log
@@ -15,21 +15,27 @@ function CreateProject() {
     name: '',
     description: '',
     folder_path: '',
-    roster_type: 'file', // 'file' or 'url'
-    roster_data: '',
-    metadata_config: {}
+    metadata_config: {
+      tags: [],
+      categories: [],
+      custom_fields: []
+    }
   });
 
   // UI state
   const [loading, setLoading] = useState(false);
-  const [errors, setErrors] = useState({});
+  const [errors, setErrors] = useState({
+    name: '',
+    folder_path: '',
+    general: ''
+  })
   const [success, setSuccess] = useState('');
 
   // Folder selection state
   const [folderInfo, setFolderInfo] = useState(null);
   const [selectingFolder, setSelectingFolder] = useState(false);
 
-  // Handle form input changes
+  // Handle input changes
   const handleInputChange = (e) => {
     const { name, value } = e.target;
     setFormData(prev => ({
@@ -37,7 +43,7 @@ function CreateProject() {
       [name]: value
     }));
     
-    // Clear field-specific errors
+    // Clear errors for this field
     if (errors[name]) {
       setErrors(prev => ({
         ...prev,
@@ -46,43 +52,42 @@ function CreateProject() {
     }
   };
 
-  // Handle roster type toggle
-  const handleRosterTypeChange = (type) => {
-    setFormData(prev => ({
-      ...prev,
-      roster_type: type,
-      roster_data: '' // Clear roster data when switching types
-    }));
-    
-    // Clear roster-related errors
-    if (errors.roster_data) {
-      setErrors(prev => ({
-        ...prev,
-        roster_data: ''
-      }));
-    }
-  };
-
-  // Select folder using Tauri dialog
+  // Select folder using Tauri dialog or mock in development
   const handleSelectFolder = async () => {
     setSelectingFolder(true);
     setErrors(prev => ({ ...prev, folder_path: '' }));
     
     try {
-      const { data, error } = await tauriUtils.selectFolderWithInfo();
-      
-      if (error) {
-        setErrors(prev => ({ ...prev, folder_path: error.message }));
-        return;
-      }
-      
-      if (data) {
+      if (isDevelopment) {
+        // Mock folder selection for development
+        const mockFolderInfo = {
+          path: '/mock/project/folder',
+          can_write: true,
+          is_directory: true
+        };
         setFormData(prev => ({
           ...prev,
-          folder_path: data.path
+          folder_path: mockFolderInfo.path
         }));
-        setFolderInfo(data);
-        setSuccess('Folder selected successfully!');
+        setFolderInfo(mockFolderInfo);
+        setSuccess('Mock folder selected for development!');
+      } else {
+        // Use Tauri folder selection
+        const { data, error } = await tauriUtils.selectFolderWithInfo();
+        
+        if (error) {
+          setErrors(prev => ({ ...prev, folder_path: error.message }));
+          return;
+        }
+        
+        if (data) {
+          setFormData(prev => ({
+            ...prev,
+            folder_path: data.path
+          }));
+          setFolderInfo(data);
+          setSuccess('Folder selected successfully!');
+        }
       }
     } catch (error) {
       setErrors(prev => ({ 
@@ -98,25 +103,18 @@ function CreateProject() {
   const validateForm = () => {
     const newErrors = {};
 
-    // Required fields
+    // Validate required fields
     if (!formData.name.trim()) {
       newErrors.name = 'Project name is required';
     }
-
+    
     if (!formData.folder_path) {
-      newErrors.folder_path = 'Please select a project folder';
+      newErrors.folder_path = 'Project folder is required';
     }
-
-    // Roster data validation
-    if (formData.roster_type === 'url' && formData.roster_data) {
-      try {
-        const url = new URL(formData.roster_data);
-        if (!['http:', 'https:'].includes(url.protocol)) {
-          newErrors.roster_data = 'URL must use HTTP or HTTPS protocol';
-        }
-      } catch {
-        newErrors.roster_data = 'Please enter a valid URL';
-      }
+    
+    // Validate folder path format
+    if (formData.folder_path && !formData.folder_path.includes('/') && !formData.folder_path.includes('\\')) {
+      newErrors.folder_path = 'Please select a valid folder path';
     }
 
     setErrors(newErrors);
@@ -132,7 +130,7 @@ function CreateProject() {
     }
 
     // Check if user is authenticated
-    if (!user || !accessToken) {
+    if (!user || (!accessToken && !isDevelopment)) {
       setErrors(prev => ({ 
         ...prev, 
         general: 'You must be signed in to create a project. Please sign in first.' 
@@ -145,46 +143,140 @@ function CreateProject() {
     setSuccess('');
 
     try {
-      // Prepare project data
+      // Prepare project data for backend
       const projectData = {
         user_id: user.id,
         name: formData.name.trim(),
         description: formData.description.trim() || 'New project',
+        image_url: 'https://img.freepik.com/premium-vector/photographer-with-camera-flat-vector-illustration_648489-88.jpg',
         folder_path: formData.folder_path,
-        roster_type: formData.roster_type,
-        roster_data: formData.roster_data || null,
-        metadata_config: formData.metadata_config,
-        image_url: 'https://img.freepik.com/premium-vector/photographer-with-camera-flat-vector-illustration_648489-88.jpg'
+        metadata_config: formData.metadata_config
       };
 
-      // Create project using Tauri backend
-      console.log('Debug - accessToken:', accessToken); // Debug log
-      console.log('Debug - projectData:', projectData); // Debug log
-      
-      if (!accessToken) {
-        throw new Error('Access token is missing. Please sign in again.');
-      }
-      
-      const { data, error } = await tauriSupabase
-        .from('projects')
-        .insert([projectData], accessToken);
-
-      if (error) {
-        throw new Error(error.message || 'Failed to create project');
-      }
-
-      if (data && data[0]) {
-        setSuccess('Project created successfully!');
+      // Validate project data before sending to backend
+      if (!projectData.user_id || !projectData.name || !projectData.folder_path) {
+        const missingFields = [];
+        if (!projectData.user_id) missingFields.push('user_id');
+        if (!projectData.name) missingFields.push('name');
+        if (!projectData.folder_path) missingFields.push('folder_path');
         
-        // Navigate to the new project after a short delay
+        throw new Error(`Missing required fields: ${missingFields.join(', ')}`);
+      }
+      
+      // Ensure user_id is a valid UUID format
+      if (typeof projectData.user_id !== 'string' || projectData.user_id.length < 10) {
+        throw new Error('Invalid user ID format');
+      }
+      
+      // Ensure metadata_config is a valid object
+      if (projectData.metadata_config && typeof projectData.metadata_config !== 'object') {
+        throw new Error('Invalid metadata config format');
+      }
+
+      let result;
+
+      if (isDevelopment) {
+        // Use mock project creation in development mode
+        result = await createMockProject(projectData);
+      } else {
+        // Use Tauri backend to create project
+        console.log('Debug - accessToken:', accessToken); // Debug log
+        console.log('Debug - projectData:', projectData); // Debug log
+        
+        if (!accessToken) {
+          throw new Error('Access token is missing. Please sign in again.');
+        }
+        
+        // Create the project data structure that matches CreateProjectRequest
+        const projectForBackend = {
+          user_id: user.id,
+          name: formData.name.trim(),
+          description: formData.description.trim() || 'New project',
+          image_url: 'https://img.freepik.com/premium-vector/photographer-with-camera-flat-vector-illustration_648489-88.jpg'
+        };
+        
+        console.log('Debug - projectForBackend:', projectForBackend); // Debug log
+        
+        try {
+          // Use the Tauri invoke command directly instead of tauriSupabase
+          const { invoke } = await import('@tauri-apps/api/core');
+          const createdProject = await invoke('create_project', { 
+            project: projectForBackend, 
+            accessToken 
+          });
+          
+          console.log('Debug - Tauri create_project result:', createdProject); // Debug log
+          result = { data: [createdProject], error: null };
+        } catch (invokeError) {
+          console.error('Debug - Tauri invoke error:', invokeError); // Debug log
+          throw new Error(`Backend project creation failed: ${invokeError}`);
+        }
+      }
+
+      if (result.error) {
+        throw new Error(result.error.message || 'Failed to create project');
+      }
+
+      console.log('Project creation result:', result); // Debug log
+
+      if (result.data && result.data[0]) {
+        const createdProject = result.data[0];
+        console.log('Created project:', createdProject); // Debug log
+        
+        if (createdProject.id) {
+          setSuccess('Project created successfully!');
+          // Navigate to the project page after a short delay
+          setTimeout(() => {
+            navigate(`/project/${createdProject.id}`);
+          }, 1500);
+        } else {
+          console.warn('Project created but no ID returned:', createdProject);
+          setSuccess('Project created successfully! Redirecting to dashboard...');
+          setTimeout(() => {
+            navigate('/dashboard?refresh=true');
+          }, 1500);
+        }
+      } else if (result.data && !Array.isArray(result.data)) {
+        // Handle case where result.data is a single project object
+        const createdProject = result.data;
+        console.log('Created project (single object):', createdProject); // Debug log
+        
+        if (createdProject.id) {
+          setSuccess('Project created successfully!');
+          setTimeout(() => {
+            navigate(`/project/${createdProject.id}`);
+          }, 1500);
+        } else {
+          console.warn('Project created but no ID returned:', createdProject);
+          setSuccess('Project created successfully! Redirecting to dashboard...');
+          setTimeout(() => {
+            navigate('/dashboard?refresh=true');
+          }, 1500);
+        }
+      } else {
+        // If no data returned, still show success but navigate to dashboard
+        console.warn('No project data returned from creation:', result);
+        setSuccess('Project created successfully! Redirecting to dashboard...');
         setTimeout(() => {
-          navigate(`/project/${data[0].id}`);
+          navigate('/dashboard?refresh=true');
         }, 1500);
       }
     } catch (error) {
+      console.error('Project creation error:', error); // Debug log
+      
+      // Provide more specific error messages
+      let errorMessage = error.message;
+      if (error.message.includes('id') && error.message.includes('null value')) {
+        errorMessage = 'Database error: ID field is not being auto-generated. This may be a backend configuration issue.';
+      } else if (error.message.includes('access token')) {
+        errorMessage = 'Authentication error: Please sign in again.';
+      } else if (error.message.includes('required fields')) {
+        errorMessage = `Validation error: ${error.message}`;
+      }
+      
       setErrors(prev => ({ 
         ...prev, 
-        general: error.message || 'Failed to create project. Please try again.' 
+        general: errorMessage
       }));
     } finally {
       setLoading(false);
@@ -201,6 +293,11 @@ function CreateProject() {
       <div className="create-project-header">
         <h1>Create New Project</h1>
         <p>Set up a new photo organization project with custom tagging parameters</p>
+        {isDevelopment && (
+          <div className="development-notice">
+            🚧 Development Mode - Using Mock Data
+          </div>
+        )}
       </div>
 
       <form onSubmit={handleSubmit} className="create-project-form">
@@ -248,7 +345,7 @@ function CreateProject() {
                 disabled={selectingFolder}
                 className="btn btn-secondary folder-picker-btn"
               >
-                {selectingFolder ? 'Selecting...' : 'Select Folder'}
+                {selectingFolder ? 'Selecting...' : (isDevelopment ? 'Select Mock Folder' : 'Select Folder')}
               </button>
               
               {formData.folder_path && (
@@ -277,66 +374,6 @@ function CreateProject() {
               </div>
             )}
           </div>
-        </div>
-
-        {/* Roster Configuration */}
-        <div className="form-section">
-          <h2>Team Roster</h2>
-          
-          <div className="form-group">
-            <label>Roster Type</label>
-            <div className="roster-type-toggle">
-              <button
-                type="button"
-                onClick={() => handleRosterTypeChange('file')}
-                className={`toggle-btn ${formData.roster_type === 'file' ? 'active' : ''}`}
-              >
-                📁 File Upload
-              </button>
-              <button
-                type="button"
-                onClick={() => handleRosterTypeChange('url')}
-                className={`toggle-btn ${formData.roster_type === 'url' ? 'active' : ''}`}
-              >
-                🌐 URL Input
-              </button>
-            </div>
-          </div>
-
-          {formData.roster_type === 'file' && (
-            <div className="form-group">
-              <label>Roster File</label>
-              <div className="file-upload-placeholder">
-                <span className="file-icon">📄</span>
-                <span className="file-text">
-                  File upload will be implemented in the next phase
-                </span>
-              </div>
-            </div>
-          )}
-
-          {formData.roster_type === 'url' && (
-            <div className="form-group">
-              <label htmlFor="roster_data">Roster URL</label>
-              <input
-                type="url"
-                id="roster_data"
-                name="roster_data"
-                value={formData.roster_data}
-                onChange={handleInputChange}
-                placeholder="https://example.com/roster.csv"
-                className={errors.roster_data ? 'error' : ''}
-              />
-              {errors.roster_data && <span className="error-message">{errors.roster_data}</span>}
-              
-              {formData.roster_data && (
-                <div className="url-preview">
-                  <span className="url-icon">🔗</span>
-                  <span className="url-text">{formData.roster_data}</span>
-                </div>
-              )}
-            </div>
-          )}
         </div>
 
         {/* Error Display */}

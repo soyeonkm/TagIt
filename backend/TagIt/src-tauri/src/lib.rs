@@ -1,7 +1,7 @@
 mod config;
 mod supabase;
 
-use supabase::{SupabaseService, AuthUser, Profile, Project};
+use supabase::{SupabaseService, AuthUser, Profile, Project, CreateProjectRequest};
 // use serde::{Deserialize, Serialize};
 use anyhow::Result;
 use std::path::PathBuf;
@@ -55,7 +55,7 @@ async fn get_project_by_id(project_id: String, user_id: String, access_token: St
 }
 
 #[tauri::command]
-async fn create_project(project: Project, access_token: String) -> Result<Project, String> {
+async fn create_project(project: CreateProjectRequest, access_token: String) -> Result<Project, String> {
     let service = SupabaseService::new().map_err(|e| e.to_string())?;
     service.create_project(project, &access_token).await.map_err(|e| e.to_string())
 }
@@ -162,6 +162,57 @@ async fn select_folder_with_info() -> Result<serde_json::Value, String> {
     }))
 }
 
+// Command to read photos from a project folder
+#[tauri::command]
+async fn read_project_folder(project_id: String, folder_path: String, access_token: String) -> Result<Vec<serde_json::Value>, String> {
+    // Validate the folder path exists and is accessible
+    let path = PathBuf::from(&folder_path);
+    if !path.exists() {
+        return Err("Folder path does not exist".to_string());
+    }
+    
+    if !path.is_dir() {
+        return Err("Path is not a directory".to_string());
+    }
+
+    // Read directory contents
+    let entries = fs::read_dir(&path)
+        .map_err(|e| format!("Failed to read directory: {}", e))?;
+
+    let mut photos = Vec::new();
+    
+    for entry in entries {
+        if let Ok(entry) = entry {
+            let file_path = entry.path();
+            
+            // Check if it's an image file
+            if let Some(extension) = file_path.extension() {
+                let ext = extension.to_string_lossy().to_lowercase();
+                if matches!(ext.as_str(), "jpg" | "jpeg" | "png" | "gif" | "bmp" | "webp" | "tiff") {
+                    // Get file metadata
+                    if let Ok(metadata) = fs::metadata(&file_path) {
+                        let photo_info = serde_json::json!({
+                            "id": file_path.file_name().unwrap_or_default().to_string_lossy(),
+                            "name": file_path.file_name().unwrap_or_default().to_string_lossy(),
+                            "path": file_path.to_string_lossy(),
+                            "size": format!("{:.1} MB", metadata.len() as f64 / 1024.0 / 1024.0),
+                            "dimensions": "Unknown", // Would need image processing library to get actual dimensions
+                            "dateModified": metadata.modified()
+                                .map(|t| t.duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs())
+                                .unwrap_or(0),
+                            "type": format!("image/{}", ext)
+                        });
+                        
+                        photos.push(photo_info);
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(photos)
+}
+
 // Keep the original greet command for testing
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -187,7 +238,8 @@ pub fn run() {
             reset_password,
             update_password,
             select_folder,
-            select_folder_with_info
+            select_folder_with_info,
+            read_project_folder
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

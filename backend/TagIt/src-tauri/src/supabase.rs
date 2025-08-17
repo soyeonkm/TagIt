@@ -27,6 +27,16 @@ pub struct Project {
     pub description: String,
     pub image_url: String,
     pub created_at: Option<String>,
+    pub folder_path: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CreateProjectRequest {
+    pub user_id: String,
+    pub name: String,
+    pub description: String,
+    pub image_url: String,
+    pub folder_path: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -198,9 +208,9 @@ impl SupabaseService {
         }
     }
 
-    pub async fn create_project(&self, project: Project, access_token: &str) -> Result<Project> {
+    pub async fn create_project(&self, project: CreateProjectRequest, access_token: &str) -> Result<Project> {
         let url = format!("{}/rest/v1/projects", self.base_url);
-
+    
         let response = self.client
             .post(&url)
             .header("apikey", &self.anon_key)
@@ -210,10 +220,18 @@ impl SupabaseService {
             .json(&project)
             .send()
             .await?;
-
+    
         if response.status().is_success() {
             let projects: Vec<Project> = response.json().await?;
-            Ok(projects.into_iter().next().unwrap_or(project))
+            Ok(projects.into_iter().next().unwrap_or(Project {
+                id: None,
+                user_id: project.user_id,
+                name: project.name,
+                description: project.description,
+                image_url: project.image_url,
+                created_at: None,
+                folder_path: None,
+            }))
         } else {
             let error_text = response.text().await?;
             Err(anyhow::anyhow!("Failed to create project: {}", error_text))

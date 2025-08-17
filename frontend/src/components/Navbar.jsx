@@ -13,7 +13,7 @@ function Navbar() {
   const [showLogoutMsg, setShowLogoutMsg] = useState(false)
   const [logoutMsgOpacity, setLogoutMsgOpacity] = useState(1)
   const [profile, setProfile] = useState(null)
-  const { user, signOut } = useAuth()
+  const { user, signOut, isDevelopment } = useAuth()
 
   
   useEffect(() => {
@@ -36,17 +36,26 @@ function Navbar() {
 
   useEffect(() => {
     if (user) {
-      // Fetch profile from SQL table
-      tauriSupabase
-        .from('profiles')
-        .select('*')
-        .eq('id', user.id)
-        .single()
-        .then(({ data }) => setProfile(data))
+      if (isDevelopment) {
+        // Use mock profile data in development mode
+        const mockProfile = {
+          first_name: user.user_metadata?.name || 'Demo',
+          last_name: 'User'
+        };
+        setProfile(mockProfile);
+      } else {
+        // Fetch profile from SQL table in Tauri mode
+        tauriSupabase
+          .from('profiles')
+          .select('*')
+          .eq('id', user.id)
+          .single()
+          .then(({ data }) => setProfile(data))
+      }
     } else {
       setProfile(null)
     }
-  }, [user])
+  }, [user, isDevelopment])
 
   const toggleDropdown = () => {
     setIsDropdownOpen(!isDropdownOpen)
@@ -56,16 +65,23 @@ function Navbar() {
     <>
       <nav className="navbar">
         <div className="navbar-content">
-          <span
-            onClick={() => {
-              if (user) navigate('/dashboard')
-              else navigate('/')
-            }}
-            className="navbar-brand"
-            style={{ cursor: 'pointer', userSelect: 'none' }}
-          >
-            TagIt
-          </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+            <span
+              onClick={() => {
+                if (user) navigate('/dashboard')
+                else navigate('/')
+              }}
+              className="navbar-brand"
+              style={{ cursor: 'pointer', userSelect: 'none' }}
+            >
+              TagIt
+            </span>
+            {isDevelopment && (
+              <div className="dev-badge">
+                DEV
+              </div>
+            )}
+          </div>
           <div style={{ 
             display: 'flex', 
             gap: '1rem',

@@ -194,11 +194,39 @@ export const tauriProjects = {
       return { data: null, error: { message: 'Access token is required. Please sign in first.' } };
     }
     
+    // Validate projectData structure
+    if (!projectData || !Array.isArray(projectData) || projectData.length === 0) {
+      console.error('Debug - Invalid projectData format:', projectData);
+      return { data: null, error: { message: 'Invalid project data format' } };
+    }
+    
     try {
       // projectData is already an array, so we take the first element
-      const project = await invoke('create_project', { project: projectData[0], accessToken });
+      const projectToCreate = projectData[0];
+      console.log('Debug - Project to create:', projectToCreate); // Debug log
+      
+      // Ensure we don't have an id field that could cause issues
+      const { id, ...cleanProjectData } = projectToCreate;
+      console.log('Debug - Clean project data (without id):', cleanProjectData); // Debug log
+      
+      // Log the exact data being sent to the backend
+      console.log('Debug - Sending to backend:', {
+        project: cleanProjectData,
+        accessToken: accessToken ? 'present' : 'missing'
+      }); // Debug log
+      
+      const project = await invoke('create_project', { project: cleanProjectData, accessToken });
+      console.log('Debug - Backend response:', project); // Debug log
+      
+      // Validate the response
+      if (!project || typeof project !== 'object') {
+        console.error('Debug - Invalid backend response:', project);
+        return { data: null, error: { message: 'Backend returned invalid response' } };
+      }
+      
       return { data: [project], error: null };
     } catch (error) {
+      console.error('Debug - Backend error:', error); // Debug log
       return { data: null, error: { message: error } };
     }
   }
