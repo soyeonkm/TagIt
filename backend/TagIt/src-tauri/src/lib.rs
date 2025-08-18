@@ -444,7 +444,7 @@ async fn get_image_thumbnail(file_path: String, width: u32, height: u32, quality
 async fn read_photo_metadata(file_path: String) -> Result<serde_json::Value, String> {
     use std::path::Path;
     
-    println!("Reading metadata for file: {}", file_path);
+    println!("Reading metadata for file: {}", file_path); // Commented out to hide status message
     
     let path = Path::new(&file_path);
     if !path.exists() {

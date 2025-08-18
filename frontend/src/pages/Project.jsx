@@ -1033,21 +1033,12 @@ function Project() {
                       <h3>Edit Metadata</h3>
                       <button 
                         onClick={closeMetadataPanel}
-                        className="close-button"
-                      >
+                        className="close-button">
                         ×
                       </button>
                     </div>
                     <div className="metadata-panel-content">
                       <div className="metadata-details">
-                        {/* Loading indicator */}
-                        {loadingMetadata && (
-                          <div className="metadata-loading">
-                            <div className="loading-spinner-small"></div>
-                            <span>Loading existing metadata...</span>
-                          </div>
-                        )}
-                        
                         {/* Editable XMP metadata only */}
                         <div className="metadata-section">
                           <h4 className="metadata-section-title">Edit Photo Metadata</h4>
