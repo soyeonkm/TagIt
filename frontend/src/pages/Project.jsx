@@ -17,6 +17,7 @@ function Project() {
   const [editingPhoto, setEditingPhoto] = useState(null) // Track edited metadata
   const [hasMetadataChanges, setHasMetadataChanges] = useState(false)
   const [saveStatus, setSaveStatus] = useState({ type: '', message: '', xmpPath: '' })
+  const [loadingMetadata, setLoadingMetadata] = useState(false)
   
   // Add/remove body class when metadata panel opens/closes
   useEffect(() => {
@@ -483,12 +484,77 @@ function Project() {
     // setPhotoDataUrls(prev => ({ ...prev, ...newDataUrls })); // This state is no longer needed
   }
 
-  const handlePhotoClick = (photo) => {
+  const handlePhotoClick = async (photo) => {
     setSelectedPhoto(photo);
-    setEditingPhoto({ ...photo }); // Create a copy for editing
     setMetadataPanelOpen(true);
     setHasMetadataChanges(false);
     setSaveStatus({ type: '', message: '', xmpPath: '' });
+    setLoadingMetadata(true);
+    
+    try {
+      // Load existing XMP metadata for this photo
+      const { invoke } = await import('@tauri-apps/api/core');
+      
+      const result = await invoke('read_photo_metadata', {
+        filePath: photo.path
+      });
+      
+      if (result.success) {
+        if (result.hasMetadata) {
+          // Use existing metadata
+          const existingMetadata = result.metadata;
+          setEditingPhoto({
+            ...photo,
+            xmpTitle: existingMetadata.title || '',
+            xmpDescription: existingMetadata.description || '',
+            xmpKeywords: existingMetadata.keywords || '',
+            xmpCreator: existingMetadata.creator || '',
+            xmpCopyright: existingMetadata.copyright || '',
+            xmpRating: existingMetadata.rating || 0,
+            xmpColorLabel: existingMetadata.colorLabel || 'None'
+          });
+        } else {
+          // No existing metadata, start with empty fields
+          setEditingPhoto({
+            ...photo,
+            xmpTitle: '',
+            xmpDescription: '',
+            xmpKeywords: '',
+            xmpCreator: '',
+            xmpCopyright: '',
+            xmpRating: 0,
+            xmpColorLabel: 'None'
+          });
+        }
+      } else {
+        // Fallback to empty fields if there's an error
+        setEditingPhoto({
+          ...photo,
+          xmpTitle: '',
+          xmpDescription: '',
+          xmpKeywords: '',
+          xmpCreator: '',
+          xmpCopyright: '',
+          xmpRating: 0,
+          xmpColorLabel: 'None'
+        });
+      }
+    } catch (error) {
+      console.error('Failed to load existing metadata:', error);
+      // Fallback to empty fields
+      setEditingPhoto({
+        ...photo,
+        xmpTitle: '',
+        xmpDescription: '',
+        xmpKeywords: '',
+        xmpCreator: '',
+        xmpCopyright: '',
+        xmpRating: 0,
+        xmpColorLabel: 'None'
+      });
+    } finally {
+      setLoadingMetadata(false);
+    }
   }
 
   const handleMetadataChange = (field, value) => {
@@ -559,12 +625,62 @@ function Project() {
     }
   };
 
-  const handleResetMetadata = () => {
+  const handleResetMetadata = async () => {
     if (!selectedPhoto) return;
     
-    setEditingPhoto({ ...selectedPhoto });
-    setHasMetadataChanges(false);
-    setSaveStatus({ type: '', message: '', xmpPath: '' });
+    try {
+      // Reload the original metadata from XMP file
+      const { invoke } = await import('@tauri-apps/api/core');
+      
+      const result = await invoke('read_photo_metadata', {
+        filePath: selectedPhoto.path
+      });
+      
+      if (result.success && result.hasMetadata) {
+        // Use existing metadata
+        const existingMetadata = result.metadata;
+        setEditingPhoto({
+          ...selectedPhoto,
+          xmpTitle: existingMetadata.title || '',
+          xmpDescription: existingMetadata.description || '',
+          xmpKeywords: existingMetadata.keywords || '',
+          xmpCreator: existingMetadata.creator || '',
+          xmpCopyright: existingMetadata.copyright || '',
+          xmpRating: existingMetadata.rating || 0,
+          xmpColorLabel: existingMetadata.colorLabel || 'None'
+        });
+      } else {
+        // No existing metadata, reset to empty fields
+        setEditingPhoto({
+          ...selectedPhoto,
+          xmpTitle: '',
+          xmpDescription: '',
+          xmpKeywords: '',
+          xmpCreator: '',
+          xmpCopyright: '',
+          xmpRating: 0,
+          xmpColorLabel: 'None'
+        });
+      }
+      
+      setHasMetadataChanges(false);
+      setSaveStatus({ type: '', message: '', xmpPath: '' });
+    } catch (error) {
+      console.error('Failed to reset metadata:', error);
+      // Fallback to empty fields
+      setEditingPhoto({
+        ...selectedPhoto,
+        xmpTitle: '',
+        xmpDescription: '',
+        xmpKeywords: '',
+        xmpCreator: '',
+        xmpCopyright: '',
+        xmpRating: 0,
+        xmpColorLabel: 'None'
+      });
+      setHasMetadataChanges(false);
+      setSaveStatus({ type: '', message: '', xmpPath: '' });
+    }
   };
 
   const closeMetadataPanel = () => {
@@ -805,12 +921,20 @@ function Project() {
           <div className="photo-grid-section">
             <div className="section-header">
               <h2 className="section-title">Photos</h2>
-              {/* Current folder path display */}
+              {/* Current folder name display */}
               {project?.folder_path && (
                 <div style={{fontSize: '14px', color: '#666', marginTop: '5px', fontStyle: 'italic'}}>
-                  📁 Current folder: {project.folder_path}
+                  📁 Current folder: {project.folder_path.split(/[\\/]/).pop() || 'Unknown'}
                 </div>
               )}
+              
+              {/* Choose Folder Button */}
+              <button 
+                onClick={handleSelectFolder}
+                className="choose-folder-btn"
+              >
+                📁 Choose Different Folder
+              </button>
               
               {/* Chunk loading progress bar */}
               {allPhotos.length > 0 && (
@@ -916,6 +1040,14 @@ function Project() {
                     </div>
                     <div className="metadata-panel-content">
                       <div className="metadata-details">
+                        {/* Loading indicator */}
+                        {loadingMetadata && (
+                          <div className="metadata-loading">
+                            <div className="loading-spinner-small"></div>
+                            <span>Loading existing metadata...</span>
+                          </div>
+                        )}
+                        
                         {/* Editable XMP metadata only */}
                         <div className="metadata-section">
                           <h4 className="metadata-section-title">Edit Photo Metadata</h4>

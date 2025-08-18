@@ -1,0 +1,8 @@
+{
+  "name": "tagit-tauri",
+  "version": "1.0.0",
+  "dependencies": [
+    "libraw"
+  ],
+  "builtin-baseline": "4bb07a326d9b9bce3703272a509e5bc25dd9cfd5"
+}

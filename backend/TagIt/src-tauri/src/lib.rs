@@ -439,6 +439,146 @@ async fn get_image_thumbnail(file_path: String, width: u32, height: u32, quality
     Ok(data_url)
 }
 
+// Tauri command for reading photo XMP metadata
+#[tauri::command]
+async fn read_photo_metadata(file_path: String) -> Result<serde_json::Value, String> {
+    use std::path::Path;
+    
+    println!("Reading metadata for file: {}", file_path);
+    
+    let path = Path::new(&file_path);
+    if !path.exists() {
+        return Err(format!("File not found: {}", file_path));
+    }
+    
+    // Create XMP sidecar file path
+    let xmp_path = path.with_extension("xmp");
+    
+    // Check if XMP file exists
+    if !xmp_path.exists() {
+        // Return empty metadata if no XMP file exists
+        let mut response = serde_json::Map::new();
+        response.insert("success".to_string(), serde_json::Value::Bool(true));
+        response.insert("hasMetadata".to_string(), serde_json::Value::Bool(false));
+        response.insert("metadata".to_string(), serde_json::json!({
+            "title": "",
+            "description": "",
+            "keywords": "",
+            "creator": "",
+            "copyright": "",
+            "rating": 0,
+            "colorLabel": "None"
+        }));
+        return Ok(serde_json::Value::Object(response));
+    }
+    
+    // Read XMP file content
+    let xmp_content = fs::read_to_string(&xmp_path)
+        .map_err(|e| format!("Failed to read XMP file: {}", e))?;
+    
+    // Parse XMP content (simple XML parsing for basic fields)
+    let mut metadata = serde_json::Map::new();
+    metadata.insert("title".to_string(), serde_json::Value::String("".to_string()));
+    metadata.insert("description".to_string(), serde_json::Value::String("".to_string()));
+    metadata.insert("keywords".to_string(), serde_json::Value::String("".to_string()));
+    metadata.insert("creator".to_string(), serde_json::Value::String("".to_string()));
+    metadata.insert("copyright".to_string(), serde_json::Value::String("".to_string()));
+    metadata.insert("rating".to_string(), serde_json::Value::Number(serde_json::Number::from(0)));
+    metadata.insert("colorLabel".to_string(), serde_json::Value::String("None".to_string()));
+    
+    // Simple parsing of XMP content
+    let lines: Vec<&str> = xmp_content.lines().collect();
+    
+    // Parse basic metadata fields
+    for line in &lines {
+        let line = line.trim();
+        
+        if line.contains("<dc:title>") && line.contains("</dc:title>") {
+            if let Some(start) = line.find("<dc:title>") {
+                if let Some(end) = line.find("</dc:title>") {
+                    let title = &line[start + 10..end];
+                    metadata.insert("title".to_string(), serde_json::Value::String(title.to_string()));
+                }
+            }
+        } else if line.contains("<dc:description>") && line.contains("</dc:description>") {
+            if let Some(start) = line.find("<dc:description>") {
+                if let Some(end) = line.find("</dc:description>") {
+                    let description = &line[start + 16..end];
+                    metadata.insert("description".to_string(), serde_json::Value::String(description.to_string()));
+                }
+            }
+        } else if line.contains("<dc:creator>") && line.contains("</dc:creator>") {
+            if let Some(start) = line.find("<dc:creator>") {
+                if let Some(end) = line.find("</dc:creator>") {
+                    let creator = &line[start + 12..end];
+                    metadata.insert("creator".to_string(), serde_json::Value::String(creator.to_string()));
+                }
+            }
+        } else if line.contains("<dc:rights>") && line.contains("</dc:rights>") {
+            if let Some(start) = line.find("<dc:rights>") {
+                if let Some(end) = line.find("</dc:rights>") {
+                    let copyright = &line[start + 11..end];
+                    metadata.insert("copyright".to_string(), serde_json::Value::String(copyright.to_string()));
+                }
+            }
+        } else if line.contains("<xmp:Rating>") && line.contains("</xmp:Rating>") {
+            if let Some(start) = line.find("<xmp:Rating>") {
+                if let Some(end) = line.find("</xmp:Rating>") {
+                    let rating_str = &line[start + 12..end];
+                    if let Ok(rating) = rating_str.parse::<u64>() {
+                        metadata.insert("rating".to_string(), serde_json::Value::Number(serde_json::Number::from(rating)));
+                    }
+                }
+            }
+        } else if line.contains("<xmp:Label>") && line.contains("</xmp:Label>") {
+            if let Some(start) = line.find("<xmp:Label>") {
+                if let Some(end) = line.find("</xmp:Label>") {
+                    let label = &line[start + 11..end];
+                    metadata.insert("colorLabel".to_string(), serde_json::Value::String(label.to_string()));
+                }
+            }
+        }
+    }
+    
+    // Handle keywords (more complex due to RDF bag structure)
+    let mut keywords = Vec::new();
+    let mut in_subject = false;
+    let mut in_bag = false;
+    
+    for line in &lines {
+        let line = line.trim();
+        
+        if line.contains("<dc:subject>") {
+            in_subject = true;
+        } else if line.contains("</dc:subject>") {
+            in_subject = false;
+        } else if in_subject && line.contains("<rdf:Bag>") {
+            in_bag = true;
+        } else if in_subject && line.contains("</rdf:Bag>") {
+            in_bag = false;
+        } else if in_subject && in_bag && line.contains("<rdf:li>") && line.contains("</rdf:li>") {
+            if let Some(start) = line.find("<rdf:li>") {
+                if let Some(end) = line.find("</rdf:li>") {
+                    let keyword = &line[start + 8..end];
+                    keywords.push(keyword.to_string());
+                }
+            }
+        }
+    }
+    
+    if !keywords.is_empty() {
+        metadata.insert("keywords".to_string(), serde_json::Value::String(keywords.join(", ")));
+    }
+    
+    // Return success response with metadata
+    let mut response = serde_json::Map::new();
+    response.insert("success".to_string(), serde_json::Value::Bool(true));
+    response.insert("hasMetadata".to_string(), serde_json::Value::Bool(true));
+    response.insert("metadata".to_string(), serde_json::Value::Object(metadata));
+    
+    Ok(serde_json::Value::Object(response))
+}
+
 // Tauri command for updating photo XMP metadata
 #[tauri::command]
 async fn update_photo_metadata(file_path: String, metadata: serde_json::Value) -> Result<serde_json::Value, String> {
@@ -558,6 +698,7 @@ pub fn run() {
             read_project_folder,
             get_image_data_url,
             get_image_thumbnail,
+            read_photo_metadata,
             update_photo_metadata
         ])
         .run(tauri::generate_context!())
