@@ -2404,7 +2404,7 @@ body {
 /* Photo Grid Styles */
 .photo-grid-section {
   margin-top: 2rem;
-  position: relative;
+  position: relative; /* This ensures the metadata panel positions relative to this section */
   min-height: 400px;
   transition: all 0.3s ease;
 }
@@ -2435,58 +2435,9 @@ body {
   transition: all 0.3s ease;
 }
 
-/* Adjust photo grid when metadata panel is visible */
-.photo-grid-section:has(.metadata-sliding-panel) .photo-grid,
-.photo-grid-section.panel-open .photo-grid {
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 0.75rem;
-  margin-right: 0; /* Remove right margin to align with panel */
-  transition: all 0.3s ease;
-  transform: translateX(0);
-  /* Ensure grid extends to full width */
-  width: 100%;
-  max-width: 100%;
-}
-
-/* Ensure the adjusted layout persists when panel is fixed positioned */
-body:has(.metadata-sliding-panel) .photo-grid-section .photo-grid,
-.photo-grid-section.panel-open .photo-grid {
-  margin-right: 0; /* Remove right margin to align with panel */
-}
-
 /* Smooth transition for photo items when grid adjusts */
 .photo-grid-section.panel-open .photo-item {
   transition: all 0.3s ease;
-}
-
-
-
-/* Responsive adjustments for photo grid when panel is visible */
-@media (max-width: 1200px) {
-  .photo-grid-section:has(.metadata-sliding-panel) .photo-grid,
-  .photo-grid-section.panel-open .photo-grid {
-    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)) !important;
-    gap: 0.75rem !important;
-    margin-right: 0 !important;
-  }
-}
-
-@media (max-width: 768px) {
-  .photo-grid-section:has(.metadata-sliding-panel) .photo-grid,
-  .photo-grid-section.panel-open .photo-grid {
-    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)) !important;
-    gap: 0.5rem !important;
-    margin-right: 0 !important;
-  }
-}
-
-@media (max-width: 480px) {
-  .photo-grid-section:has(.metadata-sliding-panel) .photo-grid,
-  .photo-grid-section.panel-open .photo-grid {
-    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)) !important;
-    gap: 0.5rem !important;
-    margin-right: 0 !important;
-  }
 }
 
 .photo-item {
@@ -3056,19 +3007,19 @@ body:has(.metadata-sliding-panel) .photo-grid-section .photo-grid,
   font-weight: 500;
 } 
 
-/* Metadata Sliding Panel */
+/* Metadata Sliding Panel - Fixed to right side of page */
 .metadata-sliding-panel {
   position: fixed;
-  bottom: 20px; /* Position near bottom of page instead of top */
+  top: 80px; /* Position below navbar */
   right: 0;
   width: 350px;
-  max-height: 60vh; /* Reduced height from 80vh to 60vh */
+  height: calc(100vh - 80px); /* Use viewport height minus navbar */
   background: white;
   box-shadow: -2px 0 10px rgba(0, 0, 0, 0.1);
   z-index: 1000;
   animation: slideInRight 0.3s ease-out;
   overflow-y: auto;
-  border-radius: 8px 0 0 8px;
+  border-radius: 12px 0 0 12px; /* Increased border radius for more rounded corners */
   border: 1px solid #e5e7eb;
   backdrop-filter: blur(10px);
   background: rgba(255, 255, 255, 0.95);
@@ -3079,15 +3030,23 @@ body:has(.metadata-sliding-panel) .photo-grid-section .photo-grid,
   will-change: transform;
   /* Ensure panel overlays photo grid cleanly */
   box-shadow: -4px 0 20px rgba(0, 0, 0, 0.15);
+  /* Smooth transition for position changes */
+  transition: all 0.3s ease;
 }
+
+
 
 /* Ensure the panel doesn't interfere with photo grid interactions */
 .photo-grid-section.panel-open .photo-grid {
   pointer-events: auto;
+  /* Smooth transition for grid resizing */
+  transition: all 0.3s ease;
 }
 
 .photo-grid-section.panel-open .photo-item {
   pointer-events: auto;
+  /* Smooth transition for photo items */
+  transition: all 0.3s ease;
 }
 
 .metadata-panel-header {
@@ -3097,7 +3056,7 @@ body:has(.metadata-sliding-panel) .photo-grid-section .photo-grid,
   padding: 20px;
   border-bottom: 1px solid #e5e7eb;
   background: #f9fafb;
-  border-radius: 8px 0 0 0;
+  border-radius: 12px 0 0 0; /* Match the panel's top-left border radius */
 }
 
 .metadata-panel-header h3 {
@@ -3110,7 +3069,7 @@ body:has(.metadata-sliding-panel) .photo-grid-section .photo-grid,
 .metadata-panel-content {
   padding: 20px;
   /* Ensure content can scroll within the panel */
-  max-height: calc(60vh - 60px); /* Account for header and padding */
+  max-height: calc(100vh - 140px); /* Account for header, navbar, and padding */
   overflow-y: auto;
   scrollbar-width: thin;
   scrollbar-color: #cbd5e1 #f1f5f9;
@@ -3213,8 +3172,9 @@ body:has(.metadata-sliding-panel) .photo-grid-section .photo-grid,
   .metadata-sliding-panel {
     width: 100%;
     max-width: 350px;
-    max-height: 50vh; /* Even smaller height on medium screens */
-    bottom: 15px; /* Slightly closer to bottom on smaller screens */
+    height: calc(100vh - 80px); /* Height for fixed positioning */
+    top: 80px; /* Top position for fixed positioning */
+    position: fixed; /* Always fixed to right side */
   }
   
   .project-container.metadata-panel-open {
@@ -3228,8 +3188,9 @@ body:has(.metadata-sliding-panel) .photo-grid-section .photo-grid,
   .metadata-sliding-panel {
     width: 100%;
     max-width: 100vw;
-    max-height: 45vh; /* Smallest height on very small screens */
-    bottom: 10px; /* Closest to bottom on very small screens */
+    height: calc(100vh - 80px); /* Height for fixed positioning */
+    top: 80px; /* Top position for fixed positioning */
+    position: fixed; /* Always fixed to right side */
   }
   
   .project-container.metadata-panel-open {
@@ -3242,10 +3203,6 @@ body:has(.metadata-sliding-panel) .photo-grid-section .photo-grid,
     margin-right: 220px;
   }
   
-  .project-container.metadata-panel-open .photo-thumbnail {
-    height: 100px;
-  }
-  
   .project-container.metadata-panel-open .photo-info {
     padding: 0.5rem;
   }
@@ -3256,18 +3213,18 @@ body:has(.metadata-sliding-panel) .photo-grid-section .photo-grid,
   animation: slideOutRight 0.3s ease-in forwards;
 }
 
-/* Alternative approach: use a global class when panel is open */
+/* Ensure photo grid has proper spacing when metadata panel is open */
 body.panel-open .photo-grid-section .photo-grid {
-  margin-right: 0 !important; /* Remove right margin to align with panel */
-  width: 100% !important;
-  max-width: 100% !important;
+  margin-right: 380px !important; /* Add right margin for spacing from the fixed panel */
+  width: calc(100% - 380px) !important;
+  max-width: calc(100% - 380px) !important;
 }
 
 /* More direct targeting for the photo grid */
 body.panel-open .photo-grid {
-  margin-right: 0 !important;
-  width: 100% !important;
-  max-width: 100% !important;
+  margin-right: 380px !important;
+  width: calc(100% - 380px) !important;
+  max-width: calc(100% - 380px) !important;
 }
 
 /* Target the photo grid section directly */
@@ -3278,25 +3235,43 @@ body.panel-open .photo-grid-section {
 
 @media (max-width: 768px) {
   .metadata-panel-content {
-    max-height: calc(50vh - 60px);
+    max-height: calc(100vh - 140px); /* Height for fixed positioning */
   }
+  
+  /* Adjust panel width and photo grid spacing for smaller screens */
+  .metadata-sliding-panel {
+    width: 300px;
+    position: fixed; /* Always fixed to right side */
+  }
+  
+
 }
 
 @media (max-width: 480px) {
   .metadata-panel-content {
-    max-height: calc(45vh - 60px);
+    max-height: calc(100vh - 140px); /* Height for fixed positioning */
   }
+  
+  /* Adjust panel width and photo grid spacing for very small screens */
+  .metadata-sliding-panel {
+    width: 280px;
+    position: fixed; /* Always fixed to right side */
+  }
+  
+
 }
 
 /* Metadata Panel Content */
 .metadata-panel-content {
   padding: 20px;
   /* Ensure content can scroll within the panel */
-  max-height: calc(60vh - 60px); /* Account for header and padding */
+  max-height: calc(100vh - 140px); /* Height for fixed positioning */
   overflow-y: auto;
   scrollbar-width: thin;
   scrollbar-color: #cbd5e1 #f1f5f9;
 }
+
+
 
 /* Metadata Sections */
 .metadata-section {
@@ -3569,12 +3544,12 @@ body.panel-open .photo-grid-section {
 /* Responsive panel content height */
 @media (max-width: 768px) {
   .metadata-panel-content {
-    max-height: calc(50vh - 60px);
+    max-height: calc(100vh - 140px);
   }
 }
 
 @media (max-width: 480px) {
   .metadata-panel-content {
-    max-height: calc(45vh - 60px);
+    max-height: calc(100vh - 140px);
   }
 }

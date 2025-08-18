@@ -891,31 +891,166 @@ function Project() {
             </div>
           </div>
 
-          <div className="project-sections">
-            <div className="section-card">
-              <h3 className="section-title">Project Details</h3>
-              <p className="section-content">
-                This is where you can add more project functionality like tasks, files, or other features.
-              </p>
-              <div className="section-actions">
-                <button className="btn btn-secondary">Add Photos</button>
-                <button className="btn btn-outline">Export Project</button>
+          {/* Metadata Panel - Separate division */}
+          {metadataPanelOpen && selectedPhoto && (
+            <div className="metadata-sliding-panel">
+              <div className="metadata-panel-header">
+                <h3>Edit Metadata</h3>
+                <button 
+                  onClick={closeMetadataPanel}
+                  className="close-button"
+                >
+                  ×
+                </button>
               </div>
-            </div>
+              <div className="metadata-panel-content">
+                <div className="metadata-details">
+                  {/* Loading indicator */}
+                  {/* {loadingMetadata && (
+                    <div className="metadata-loading">
+                      <div className="loading-spinner-small"></div>
+                      <span>Loading existing metadata...</span>
+                    </div>
+                  )} */}
+                  
+                  {/* Editable XMP metadata only */}
+                  <div className="metadata-section">
+                    <h4 className="metadata-section-title">Edit Photo Metadata</h4>
+                    
+                    {/* Title */}
+                    <div className="metadata-row editable">
+                      <label className="metadata-label">Title:</label>
+                      <input
+                        type="text"
+                        className="metadata-input"
+                        placeholder="Enter photo title..."
+                        value={editingPhoto?.xmpTitle || ''}
+                        onChange={(e) => handleMetadataChange('xmpTitle', e.target.value)}
+                      />
+                    </div>
 
-            <div className="section-card">
-              <h3 className="section-title">Recent Activity</h3>
-              <div className="activity-list">
-                <div className="activity-item">
-                  <div className="activity-icon">📸</div>
-                  <div className="activity-content">
-                    <span className="activity-text">Project created</span>
-                    <span className="activity-time">Just now</span>
+                    {/* Description */}
+                    <div className="metadata-row editable">
+                      <label className="metadata-label">Description:</label>
+                      <textarea
+                        className="metadata-textarea"
+                        placeholder="Enter photo description..."
+                        value={editingPhoto?.xmpDescription || ''}
+                        onChange={(e) => handleMetadataChange('xmpDescription', e.target.value)}
+                        rows={3}
+                      />
+                    </div>
+
+                    {/* Keywords/Tags */}
+                    <div className="metadata-row editable">
+                      <label className="metadata-label">Keywords:</label>
+                      <input
+                        type="text"
+                        className="metadata-input"
+                        placeholder="Enter keywords separated by commas..."
+                        value={editingPhoto?.xmpKeywords || ''}
+                        onChange={(e) => handleMetadataChange('xmpKeywords', e.target.value)}
+                      />
+                    </div>
+
+                    {/* Creator */}
+                    <div className="metadata-row editable">
+                      <label className="metadata-label">Creator:</label>
+                      <input
+                        type="text"
+                        className="metadata-input"
+                        placeholder="Enter creator name..."
+                        value={editingPhoto?.xmpCreator || ''}
+                        onChange={(e) => handleMetadataChange('xmpCreator', e.target.value)}
+                      />
+                    </div>
+
+                    {/* Copyright */}
+                    <div className="metadata-row editable">
+                      <label className="metadata-label">Copyright:</label>
+                      <input
+                        type="text"
+                        className="metadata-input"
+                        placeholder="Enter copyright information..."
+                        value={editingPhoto?.xmpCopyright || ''}
+                        onChange={(e) => handleMetadataChange('xmpCopyright', e.target.value)}
+                      />
+                    </div>
+
+                    {/* Rating */}
+                    <div className="metadata-row editable">
+                      <label className="metadata-label">Rating:</label>
+                      <div className="rating-input">
+                        {[1, 2, 3, 4, 5].map((star) => (
+                          <button
+                            key={star}
+                            type="button"
+                            className={`star-button ${(editingPhoto?.xmpRating || 0) >= star ? 'active' : ''}`}
+                            onClick={() => handleMetadataChange('xmpRating', star)}
+                          >
+                            ★
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Color Label */}
+                    <div className="metadata-row editable">
+                      <label className="metadata-label">Color Label:</label>
+                      <div className="color-label-input">
+                        {['None', 'Red', 'Yellow', 'Green', 'Blue', 'Purple'].map((color) => (
+                          <button
+                            key={color}
+                            type="button"
+                            className={`color-button ${(editingPhoto?.xmpColorLabel || 'None') === color ? 'active' : ''}`}
+                            onClick={() => handleMetadataChange('xmpColorLabel', color)}
+                            data-color={color}
+                          >
+                            {color}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Status display */}
+                  {saveStatus.type && (
+                    <div className={`metadata-status ${saveStatus.type}`}>
+                      <div className="status-icon">
+                        {saveStatus.type === 'success' ? '✅' : '❌'}
+                      </div>
+                      <div className="status-content">
+                        <div className="status-message">{saveStatus.message}</div>
+                        {saveStatus.xmpPath && (
+                          <div className="status-xmp-path">
+                            <strong>XMP file:</strong> {saveStatus.xmpPath}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Action buttons */}
+                  <div className="metadata-actions">
+                    <button
+                      className="btn btn-primary"
+                      onClick={handleSaveMetadata}
+                      disabled={!hasMetadataChanges}
+                    >
+                      💾 Save Changes
+                    </button>
+                    <button
+                      className="btn btn-secondary"
+                      onClick={handleResetMetadata}
+                      disabled={!hasMetadataChanges}
+                    >
+                      🔄 Reset
+                    </button>
                   </div>
                 </div>
               </div>
             </div>
-          </div>
+          )}
 
           {/* Photo Grid Section */}
           <div className="photo-grid-section">
@@ -1026,166 +1161,8 @@ function Project() {
                   )}
                 </div>
                 
-                {/* Metadata Panel - Floating within photo grid section */}
-                {metadataPanelOpen && selectedPhoto && (
-                  <div className="metadata-sliding-panel">
-                    <div className="metadata-panel-header">
-                      <h3>Edit Metadata</h3>
-                      <button 
-                        onClick={closeMetadataPanel}
-                        className="close-button"
-                      >
-                        ×
-                      </button>
-                    </div>
-                    <div className="metadata-panel-content">
-                      <div className="metadata-details">
-                        {/* Loading indicator */}
-                        {loadingMetadata && (
-                          <div className="metadata-loading">
-                            <div className="loading-spinner-small"></div>
-                            <span>Loading existing metadata...</span>
-                          </div>
-                        )}
-                        
-                        {/* Editable XMP metadata only */}
-                        <div className="metadata-section">
-                          <h4 className="metadata-section-title">Edit Photo Metadata</h4>
-                          
-                          {/* Title */}
-                          <div className="metadata-row editable">
-                            <label className="metadata-label">Title:</label>
-                            <input
-                              type="text"
-                              className="metadata-input"
-                              placeholder="Enter photo title..."
-                              value={editingPhoto?.xmpTitle || ''}
-                              onChange={(e) => handleMetadataChange('xmpTitle', e.target.value)}
-                            />
-                          </div>
 
-                          {/* Description */}
-                          <div className="metadata-row editable">
-                            <label className="metadata-label">Description:</label>
-                            <textarea
-                              className="metadata-textarea"
-                              placeholder="Enter photo description..."
-                              value={editingPhoto?.xmpDescription || ''}
-                              onChange={(e) => handleMetadataChange('xmpDescription', e.target.value)}
-                              rows={3}
-                            />
-                          </div>
-
-                          {/* Keywords/Tags */}
-                          <div className="metadata-row editable">
-                            <label className="metadata-label">Keywords:</label>
-                            <input
-                              type="text"
-                              className="metadata-input"
-                              placeholder="Enter keywords separated by commas..."
-                              value={editingPhoto?.xmpKeywords || ''}
-                              onChange={(e) => handleMetadataChange('xmpKeywords', e.target.value)}
-                            />
-                          </div>
-
-                          {/* Creator */}
-                          <div className="metadata-row editable">
-                            <label className="metadata-label">Creator:</label>
-                            <input
-                              type="text"
-                              className="metadata-input"
-                              placeholder="Enter creator name..."
-                              value={editingPhoto?.xmpCreator || ''}
-                              onChange={(e) => handleMetadataChange('xmpCreator', e.target.value)}
-                            />
-                          </div>
-
-                          {/* Copyright */}
-                          <div className="metadata-row editable">
-                            <label className="metadata-label">Copyright:</label>
-                            <input
-                              type="text"
-                              className="metadata-input"
-                              placeholder="Enter copyright information..."
-                              value={editingPhoto?.xmpCopyright || ''}
-                              onChange={(e) => handleMetadataChange('xmpCopyright', e.target.value)}
-                            />
-                          </div>
-
-                          {/* Rating */}
-                          <div className="metadata-row editable">
-                            <label className="metadata-label">Rating:</label>
-                            <div className="rating-input">
-                              {[1, 2, 3, 4, 5].map((star) => (
-                                <button
-                                  key={star}
-                                  type="button"
-                                  className={`star-button ${(editingPhoto?.xmpRating || 0) >= star ? 'active' : ''}`}
-                                  onClick={() => handleMetadataChange('xmpRating', star)}
-                                >
-                                  ★
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-
-                          {/* Color Label */}
-                          <div className="metadata-row editable">
-                            <label className="metadata-label">Color Label:</label>
-                            <div className="color-label-input">
-                                                             {['None', 'Red', 'Yellow', 'Green', 'Blue', 'Purple'].map((color) => (
-                                 <button
-                                   key={color}
-                                   type="button"
-                                   className={`color-button ${(editingPhoto?.xmpColorLabel || 'None') === color ? 'active' : ''}`}
-                                   onClick={() => handleMetadataChange('xmpColorLabel', color)}
-                                   data-color={color}
-                                 >
-                                   {color}
-                                 </button>
-                               ))}
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Status display */}
-                        {saveStatus.type && (
-                          <div className={`metadata-status ${saveStatus.type}`}>
-                            <div className="status-icon">
-                              {saveStatus.type === 'success' ? '✅' : '❌'}
-                            </div>
-                            <div className="status-content">
-                              <div className="status-message">{saveStatus.message}</div>
-                              {saveStatus.xmpPath && (
-                                <div className="status-xmp-path">
-                                  <strong>XMP file:</strong> {saveStatus.xmpPath}
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Action buttons */}
-                        <div className="metadata-actions">
-                          <button
-                            className="btn btn-primary"
-                            onClick={handleSaveMetadata}
-                            disabled={!hasMetadataChanges}
-                          >
-                            💾 Save Changes
-                          </button>
-                          <button
-                            className="btn btn-secondary"
-                            onClick={handleResetMetadata}
-                            disabled={!hasMetadataChanges}
-                          >
-                            🔄 Reset
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
+                    
               </div>
             ) : (
               <div className="empty-photos">
