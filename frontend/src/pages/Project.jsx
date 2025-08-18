@@ -1053,7 +1053,7 @@ function Project() {
           )}
 
           {/* Photo Grid Section */}
-          <div className="photo-grid-section">
+          <div className={`photo-grid-section ${metadataPanelOpen ? 'panel-open' : ''}`}>
             <div className="section-header">
               <h2 className="section-title">Photos</h2>
               {/* Current folder name display */}
@@ -1096,73 +1096,68 @@ function Project() {
                 <p>Loading photos from folder...</p>
               </div>
             ) : allPhotos.length > 0 ? (
-              <div className={`photo-grid-section ${metadataPanelOpen ? 'panel-open' : ''}`}>
-                <div className="photo-grid" ref={photoGridRef}>
-                  {visiblePhotos.map((photo, index) => {
-                    const chunkNumber = Math.floor(index / PHOTOS_PER_CHUNK);
-                    const thumbnailUrl = thumbnailCache.get(photo.id);
-                    const isLoadingThumbnail = loadingThumbnails.has(photo.id);
-                    
-                    return (
-                      <div 
-                        key={photo.id} 
-                        className="photo-item"
-                        onClick={() => handlePhotoClick(photo)}
-                        title={`Photo ${index + 1} of ${allPhotos.length}`}
-                      >
-                        <div className="photo-thumbnail">
-                          {thumbnailUrl ? (
-                            <img 
-                              src={thumbnailUrl} 
-                              alt={photo.name}
-                              className="photo-thumbnail-image"
-                              loading="lazy"
-                            />
-                          ) : isLoadingThumbnail ? (
-                            <div className="photo-placeholder loading">
-                              <div className="loading-spinner-small"></div>
-                              <span className="loading-text">Loading...</span>
-                            </div>
-                          ) : (
-                            <div className="photo-placeholder">
-                              <span className="photo-icon">📷</span>
-                            </div>
-                          )}
-                        </div>
-                        <div className="photo-info">
-                          <span className="photo-name">{photo.name}</span>
-                          <span className="photo-size">{photo.size}</span>
-                        </div>
-                      </div>
-                    );
-                  })}
+              <div className="photo-grid" ref={photoGridRef}>
+                {visiblePhotos.map((photo, index) => {
+                  const chunkNumber = Math.floor(index / PHOTOS_PER_CHUNK);
+                  const thumbnailUrl = thumbnailCache.get(photo.id);
+                  const isLoadingThumbnail = loadingThumbnails.has(photo.id);
                   
-                  {/* Loading sentinel for intersection observer */}
-                  {visiblePhotos.length < allPhotos.length && (
+                  return (
                     <div 
-                      ref={sentinelRef}
-                      className="loading-sentinel"
-                      style={{ 
-                        width: '100%', 
-                        height: '20px', 
-                        display: 'flex', 
-                        alignItems: 'center', 
-                        justifyContent: 'center',
-                        color: '#666',
-                        fontSize: '14px'
-                      }}
+                      key={photo.id} 
+                      className="photo-item"
+                      onClick={() => handlePhotoClick(photo)}
+                      title={`Photo ${index + 1} of ${allPhotos.length}`}
                     >
-                      {isLoadingMore ? (
-                        <span>🔄 Loading more photos...</span>
-                      ) : (
-                        <span>⬇️ Scroll to load more photos</span>
-                      )}
+                      <div className="photo-thumbnail">
+                        {thumbnailUrl ? (
+                          <img 
+                            src={thumbnailUrl} 
+                            alt={photo.name}
+                            className="photo-thumbnail-image"
+                            loading="lazy"
+                          />
+                        ) : isLoadingThumbnail ? (
+                          <div className="photo-placeholder loading">
+                            <div className="loading-spinner-small"></div>
+                            <span className="loading-text">Loading...</span>
+                          </div>
+                        ) : (
+                          <div className="photo-placeholder">
+                            <span className="photo-icon">📷</span>
+                          </div>
+                        )}
+                      </div>
+                      <div className="photo-info">
+                        <span className="photo-name">{photo.name}</span>
+                        <span className="photo-size">{photo.size}</span>
+                      </div>
                     </div>
-                  )}
-                </div>
+                  );
+                })}
                 
-
-                    
+                {/* Loading sentinel for intersection observer */}
+                {visiblePhotos.length < allPhotos.length && (
+                  <div 
+                    ref={sentinelRef}
+                    className="loading-sentinel"
+                    style={{ 
+                      width: '100%', 
+                      height: '20px', 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      justifyContent: 'center',
+                      color: '#666',
+                      fontSize: '14px'
+                    }}
+                  >
+                    {isLoadingMore ? (
+                      <span>🔄 Loading more photos...</span>
+                    ) : (
+                      <span>⬇️ Scroll to load more photos</span>
+                    )}
+                  </div>
+                )}
               </div>
             ) : (
               <div className="empty-photos">
