@@ -30,8 +30,23 @@ rfd = "0.15"
 image = { version = "0.24", features = ["jpeg", "png", "gif", "bmp", "webp", "tiff"] }
 base64 = "0.21"
 rawloader = "0.37"
-
-
+# HTML parsing for roster extraction
+scraper = "0.18"
+# Image processing utilities
+imageproc = "0.23"
+# Async file operations
+tokio-util = "0.7"
+# Path handling
+path-slash = "0.2"
+# Error handling
+thiserror = "1.0"
+# Logging
+log = "0.4"
+env_logger = "0.10"
+# Regular expressions
+regex = "1.0"
+# Google Generative AI (Gemini) for intelligent roster parsing
+ask_gemini = "0.1"
 
 # [target.x86_64-pc-windows-gnu]
 # linker = "x86_64-w64-mingw32-gcc"

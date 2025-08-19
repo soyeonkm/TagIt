@@ -2,6 +2,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use reqwest::Client;
 use crate::config::Config;
+use crate::autotagger::{Player, PhotoMetadata};
 
 // Data structures for Supabase operations
 #[derive(Debug, Serialize, Deserialize)]
@@ -28,6 +29,8 @@ pub struct Project {
     pub image_url: String,
     pub created_at: Option<String>,
     pub folder_path: Option<String>,
+    pub roster_type: Option<String>,
+    pub roster_data: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -37,6 +40,8 @@ pub struct CreateProjectRequest {
     pub description: String,
     pub image_url: String,
     pub folder_path: Option<String>,
+    pub roster_type: Option<String>,
+    pub roster_data: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -45,10 +50,10 @@ pub struct AuthResponse {
     pub error: Option<String>,
 }
 
+#[derive(Debug, Clone)]
 pub struct SupabaseService {
-    client: Client,
-    base_url: String,
-    anon_key: String,
+    pub supabase_url: String,
+    pub supabase_anon_key: String,
 }
 
 impl SupabaseService {
@@ -57,19 +62,18 @@ impl SupabaseService {
         let client = Client::new();
 
         Ok(Self {
-            client,
-            base_url: config.supabase_url,
-            anon_key: config.supabase_anon_key,
+            supabase_url: config.supabase_url,
+            supabase_anon_key: config.supabase_anon_key,
         })
     }
 
     // Authentication methods
     pub async fn sign_up(&self, email: &str, password: &str) -> Result<AuthUser> {
-        let url = format!("{}/auth/v1/signup", self.base_url);
+        let url = format!("{}/auth/v1/signup", self.supabase_url);
 
-        let response = self.client
+        let response = reqwest::Client::new()
             .post(&url)
-            .header("apikey", &self.anon_key)
+            .header("apikey", &self.supabase_anon_key)
             .header("Content-Type", "application/json")
             .json(&serde_json::json!({
                 "email": email,
@@ -104,11 +108,11 @@ impl SupabaseService {
     }
 
     pub async fn sign_in(&self, email: &str, password: &str) -> Result<AuthUser> {
-        let url = format!("{}/auth/v1/token?grant_type=password", self.base_url);
+        let url = format!("{}/auth/v1/token?grant_type=password", self.supabase_url);
 
-        let response = self.client
+        let response = reqwest::Client::new()
             .post(&url)
-            .header("apikey", &self.anon_key)
+            .header("apikey", &self.supabase_anon_key)
             .header("Content-Type", "application/json")
             .json(&serde_json::json!({
                 "email": email,
@@ -143,12 +147,13 @@ impl SupabaseService {
     }
 
     pub async fn get_user(&self, access_token: &str) -> Result<AuthUser> {
-        let url = format!("{}/auth/v1/user", self.base_url);
+        let url = format!("{}/auth/v1/user", self.supabase_url);
 
-        let response = self.client
+        let response = reqwest::Client::new()
             .get(&url)
-            .header("apikey", &self.anon_key)
+            .header("apikey", &self.supabase_anon_key)
             .header("Authorization", &format!("Bearer {}", access_token))
+            .header("Content-Type", "application/json")
             .send()
             .await?;
 
@@ -167,11 +172,11 @@ impl SupabaseService {
 
     // Profile management
     pub async fn create_profile(&self, profile: Profile, access_token: &str) -> Result<()> {
-        let url = format!("{}/rest/v1/profiles", self.base_url);
+        let url = format!("{}/rest/v1/profiles", self.supabase_url);
 
-        let response = self.client
+        let response = reqwest::Client::new()
             .post(&url)
-            .header("apikey", &self.anon_key)
+            .header("apikey", &self.supabase_anon_key)
             .header("Authorization", &format!("Bearer {}", access_token))
             .header("Content-Type", "application/json")
             .header("Prefer", "return=minimal")
@@ -189,11 +194,11 @@ impl SupabaseService {
 
     // Project management
     pub async fn get_projects(&self, user_id: &str, access_token: &str) -> Result<Vec<Project>> {
-        let url = format!("{}/rest/v1/projects?user_id=eq.{}&order=created_at.desc", self.base_url, user_id);
+        let url = format!("{}/rest/v1/projects?user_id=eq.{}&order=created_at.desc", self.supabase_url, user_id);
 
-        let response = self.client
+        let response = reqwest::Client::new()
             .get(&url)
-            .header("apikey", &self.anon_key)
+            .header("apikey", &self.supabase_anon_key)
             .header("Authorization", &format!("Bearer {}", access_token))
             .header("Content-Type", "application/json")
             .send()
@@ -209,11 +214,11 @@ impl SupabaseService {
     }
 
     pub async fn create_project(&self, project: CreateProjectRequest, access_token: &str) -> Result<Project> {
-        let url = format!("{}/rest/v1/projects", self.base_url);
+        let url = format!("{}/rest/v1/projects", self.supabase_url);
     
-        let response = self.client
+        let response = reqwest::Client::new()
             .post(&url)
-            .header("apikey", &self.anon_key)
+            .header("apikey", &self.supabase_anon_key)
             .header("Authorization", &format!("Bearer {}", access_token))
             .header("Content-Type", "application/json")
             .header("Prefer", "return=representation")
@@ -231,6 +236,8 @@ impl SupabaseService {
                 image_url: project.image_url,
                 created_at: None,
                 folder_path: None,
+                roster_type: project.roster_type,
+                roster_data: project.roster_data,
             }))
         } else {
             let error_text = response.text().await?;
@@ -239,11 +246,11 @@ impl SupabaseService {
     }
 
     pub async fn update_project(&self, project_id: &str, project: Project, access_token: &str) -> Result<()> {
-        let url = format!("{}/rest/v1/projects?id=eq.{}", self.base_url, project_id);
+        let url = format!("{}/rest/v1/projects?id=eq.{}", self.supabase_url, project_id);
 
-        let response = self.client
+        let response = reqwest::Client::new()
             .patch(&url)
-            .header("apikey", &self.anon_key)
+            .header("apikey", &self.supabase_anon_key)
             .header("Authorization", &format!("Bearer {}", access_token))
             .header("Content-Type", "application/json")
             .header("Prefer", "return=minimal")
@@ -260,11 +267,11 @@ impl SupabaseService {
     }
 
     pub async fn delete_project(&self, project_id: &str, access_token: &str) -> Result<()> {
-        let url = format!("{}/rest/v1/projects?id=eq.{}", self.base_url, project_id);
+        let url = format!("{}/rest/v1/projects?id=eq.{}", self.supabase_url, project_id);
 
-        let response = self.client
+        let response = reqwest::Client::new()
             .delete(&url)
-            .header("apikey", &self.anon_key)
+            .header("apikey", &self.supabase_anon_key)
             .header("Authorization", &format!("Bearer {}", access_token))
             .header("Content-Type", "application/json")
             .header("Prefer", "return=minimal")
@@ -281,11 +288,11 @@ impl SupabaseService {
 
     // Get project by ID
     pub async fn get_project_by_id(&self, project_id: &str, user_id: &str, access_token: &str) -> Result<Option<Project>> {
-        let url = format!("{}/rest/v1/projects?id=eq.{}&user_id=eq.{}", self.base_url, project_id, user_id);
+        let url = format!("{}/rest/v1/projects?id=eq.{}&user_id=eq.{}", self.supabase_url, project_id, user_id);
 
-        let response = self.client
+        let response = reqwest::Client::new()
             .get(&url)
-            .header("apikey", &self.anon_key)
+            .header("apikey", &self.supabase_anon_key)
             .header("Authorization", &format!("Bearer {}", access_token))
             .header("Content-Type", "application/json")
             .send()
@@ -302,12 +309,11 @@ impl SupabaseService {
 
     // Get profile by user ID
     pub async fn get_profile(&self, user_id: &str, access_token: &str) -> Result<Option<Profile>> {
-        let url = format!("{}/rest/v1/profiles?id=eq.{}", self.base_url, user_id);
+        let url = format!("{}/rest/v1/profiles?id=eq.{}", self.supabase_url, user_id);
 
-        let response = self.client
+        let response = reqwest::Client::new()
             .get(&url)
-            .header("apikey", &self.anon_key)
-            .header("Authorization", &format!("Bearer {}", access_token))
+            .header("apikey", &self.supabase_anon_key)
             .header("Content-Type", "application/json")
             .send()
             .await?;
@@ -323,11 +329,11 @@ impl SupabaseService {
 
     // Password reset request
     pub async fn reset_password(&self, email: &str) -> Result<()> {
-        let url = format!("{}/auth/v1/recover", self.base_url);
+        let url = format!("{}/auth/v1/recover", self.supabase_url);
 
-        let response = self.client
+        let response = reqwest::Client::new()
             .post(&url)
-            .header("apikey", &self.anon_key)
+            .header("apikey", &self.supabase_anon_key)
             .header("Content-Type", "application/json")
             .json(&serde_json::json!({
                 "email": email
@@ -345,11 +351,11 @@ impl SupabaseService {
 
     // Update password (for reset flow)
     pub async fn update_password(&self, access_token: &str, new_password: &str) -> Result<()> {
-        let url = format!("{}/auth/v1/user", self.base_url);
+        let url = format!("{}/auth/v1/user", self.supabase_url);
 
-        let response = self.client
+        let response = reqwest::Client::new()
             .put(&url)
-            .header("apikey", &self.anon_key)
+            .header("apikey", &self.supabase_anon_key)
             .header("Authorization", &format!("Bearer {}", access_token))
             .header("Content-Type", "application/json")
             .json(&serde_json::json!({
@@ -365,4 +371,160 @@ impl SupabaseService {
             Err(anyhow::anyhow!("Failed to update password: {}", error_text))
         }
     }
+
+    // Player management methods
+    pub async fn create_player(&self, player: Player, project_id: &str, access_token: &str) -> Result<()> {
+        let url = format!("{}/rest/v1/players", self.supabase_url);
+
+        let player_data = serde_json::json!({
+            "project_id": project_id,
+            "name": player.name,
+            "jersey_number": player.jersey_number,
+            "position": player.position,
+            "team": player.team
+        });
+
+        let response = reqwest::Client::new()
+            .post(&url)
+            .header("apikey", &self.supabase_anon_key)
+            .header("Authorization", &format!("Bearer {}", access_token))
+            .header("Content-Type", "application/json")
+            .header("Prefer", "return=minimal")
+            .json(&player_data)
+            .send()
+            .await?;
+
+        if response.status().is_success() {
+            Ok(())
+        } else {
+            let error_text = response.text().await?;
+            Err(anyhow::anyhow!("Failed to create player: {}", error_text))
+        }
+    }
+
+    pub async fn get_players(&self, project_id: &str, access_token: &str) -> Result<Vec<Player>> {
+        let url = format!("{}/rest/v1/players?project_id=eq.{}", self.supabase_url, project_id);
+
+        let response = reqwest::Client::new()
+            .get(&url)
+            .header("apikey", &self.supabase_anon_key)
+            .header("Authorization", &format!("Bearer {}", access_token))
+            .header("Content-Type", "application/json")
+            .send()
+            .await?;
+
+        if response.status().is_success() {
+            let players: Vec<Player> = response.json().await?;
+            Ok(players)
+        } else {
+            let error_text = response.text().await?;
+            Err(anyhow::anyhow!("Failed to get players: {}", error_text))
+        }
+    }
+
+    pub async fn delete_player(&self, player_id: &str, access_token: &str) -> Result<()> {
+        let url = format!("{}/rest/v1/players?id=eq.{}", self.supabase_url, player_id);
+
+        let response = reqwest::Client::new()
+            .delete(&url)
+            .header("apikey", &self.supabase_anon_key)
+            .header("Authorization", &format!("Bearer {}", access_token))
+            .header("Content-Type", "application/json")
+            .header("Prefer", "return=minimal")
+            .send()
+            .await?;
+
+        if response.status().is_success() {
+            Ok(())
+        } else {
+            let error_text = response.text().await?;
+            Err(anyhow::anyhow!("Failed to delete player: {}", error_text))
+        }
+    }
+
+    // Photo metadata management methods
+    pub async fn save_photo_metadata(&self, photo: PhotoMetadata, project_id: &str, access_token: &str) -> Result<()> {
+        let url = format!("{}/rest/v1/photos", self.supabase_url);
+
+        let photo_data = serde_json::json!({
+            "project_id": project_id,
+            "file_path": photo.file_path,
+            "file_name": photo.file_name,
+            "file_size": photo.file_size,
+            "width": photo.width,
+            "height": photo.height,
+            "detected_players": photo.detected_players,
+            "detected_faces": photo.detected_faces,
+            "detected_jersey_numbers": photo.detected_jersey_numbers,
+            "description": photo.description
+        });
+
+        let response = reqwest::Client::new()
+            .post(&url)
+            .header("apikey", &self.supabase_anon_key)
+            .header("Authorization", &format!("Bearer {}", access_token))
+            .header("Content-Type", "application/json")
+            .header("Prefer", "return=minimal")
+            .json(&photo_data)
+            .send()
+            .await?;
+
+        if response.status().is_success() {
+            Ok(())
+        } else {
+            let error_text = response.text().await?;
+            Err(anyhow::anyhow!("Failed to save photo metadata: {}", error_text))
+        }
+    }
+
+    pub async fn get_photo_metadata(&self, project_id: &str, access_token: &str) -> Result<Vec<PhotoMetadata>> {
+        let url = format!("{}/rest/v1/photos?project_id=eq.{}", self.supabase_url, project_id);
+
+        let response = reqwest::Client::new()
+            .get(&url)
+            .header("apikey", &self.supabase_anon_key)
+            .header("Authorization", &format!("Bearer {}", access_token))
+            .header("Content-Type", "application/json")
+            .send()
+            .await?;
+
+        if response.status().is_success() {
+            let photos: Vec<PhotoMetadata> = response.json().await?;
+            Ok(photos)
+        } else {
+            let error_text = response.text().await?;
+            Err(anyhow::anyhow!("Failed to get photo metadata: {}", error_text))
+        }
+    }
+
+    pub async fn update_photo_metadata(&self, photo_id: &str, photo: PhotoMetadata, access_token: &str) -> Result<()> {
+        let url = format!("{}/rest/v1/photos?id=eq.{}", self.supabase_url, photo_id);
+
+        let photo_data = serde_json::json!({
+            "detected_players": photo.detected_players,
+            "detected_faces": photo.detected_faces,
+            "detected_jersey_numbers": photo.detected_jersey_numbers,
+            "description": photo.description
+        });
+
+        let response = reqwest::Client::new()
+            .patch(&url)
+            .header("apikey", &self.supabase_anon_key)
+            .header("Authorization", &format!("Bearer {}", access_token))
+            .header("Content-Type", "application/json")
+            .header("Prefer", "return=minimal")
+            .json(&photo_data)
+            .send()
+            .await?;
+
+        if response.status().is_success() {
+            Ok(())
+        } else {
+            let error_text = response.text().await?;
+            Err(anyhow::anyhow!("Failed to update photo metadata: {}", error_text))
+        }
+    }
 }
+
+// Alias for backward compatibility
+pub type SupabaseClient = SupabaseService;

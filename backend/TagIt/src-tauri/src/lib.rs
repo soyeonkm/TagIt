@@ -1,5 +1,7 @@
 mod config;
 mod supabase;
+mod autotagger;
+mod error;
 
 use anyhow::Result;
 use std::fs;
@@ -8,6 +10,7 @@ use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use rfd::FileDialog;
 
 use supabase::{SupabaseService, AuthUser, Profile, Project, CreateProjectRequest};
+use autotagger::{AutoTagger, Player, PhotoMetadata};
 
 
 // Tauri commands for authentication
@@ -669,6 +672,61 @@ async fn update_photo_metadata(file_path: String, metadata: serde_json::Value) -
     Ok(serde_json::Value::Object(response))
 }
 
+// New Tauri commands for automatic tagging
+#[tauri::command]
+async fn parse_roster_from_url(
+    url: String,
+    project_id: String,
+    access_token: String,
+) -> Result<Vec<Player>, String> {
+    let supabase = SupabaseService::new().map_err(|e| e.to_string())?;
+    
+    // Parse roster from URL
+    let autotagger = AutoTagger::new(supabase.clone()).map_err(|e| e.to_string())?;
+    let players = autotagger.parse_roster_from_url(&url).await.map_err(|e| e.to_string())?;
+    
+    // Save players to database
+    for player in &players {
+        supabase.create_player(player.clone(), &project_id, &access_token).await
+            .map_err(|e| e.to_string())?;
+    }
+    
+    Ok(players)
+}
+
+#[tauri::command]
+async fn process_photo_folder(
+    project_id: String,
+    folder_path: String,
+    access_token: String,
+) -> Result<Vec<PhotoMetadata>, String> {
+    let supabase = SupabaseService::new().map_err(|e| e.to_string())?;
+    let autotagger = AutoTagger::new(supabase.clone()).map_err(|e| e.to_string())?;
+    
+    let results = autotagger.process_photo_folder(&project_id, &folder_path).await
+        .map_err(|e| e.to_string())?;
+    
+    // Save photo metadata to database
+    for photo in &results {
+        supabase.save_photo_metadata(photo.clone(), &project_id, &access_token).await
+            .map_err(|e| e.to_string())?;
+    }
+    
+    Ok(results)
+}
+
+#[tauri::command]
+async fn get_project_players(project_id: String, access_token: String) -> Result<Vec<Player>, String> {
+    let supabase = SupabaseService::new().map_err(|e| e.to_string())?;
+    supabase.get_players(&project_id, &access_token).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn get_project_photos(project_id: String, access_token: String) -> Result<Vec<PhotoMetadata>, String> {
+    let supabase = SupabaseService::new().map_err(|e| e.to_string())?;
+    supabase.get_photo_metadata(&project_id, &access_token).await.map_err(|e| e.to_string())
+}
+
 // Keep the original greet command for testing
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -699,7 +757,12 @@ pub fn run() {
             get_image_data_url,
             get_image_thumbnail,
             read_photo_metadata,
-            update_photo_metadata
+            update_photo_metadata,
+            // New autotagger commands
+            parse_roster_from_url,
+            process_photo_folder,
+            get_project_players,
+            get_project_photos
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

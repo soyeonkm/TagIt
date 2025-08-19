@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { tauriSupabase } from '../tauriClient'
 import { useAuth } from '../contexts/AuthContext'
+import AutoTagger from '../components/AutoTagger'
 
 function Project() {
   const { id } = useParams()
@@ -959,7 +960,7 @@ function Project() {
                       <input
                         type="text"
                         className="metadata-input"
-                        placeholder="Enter creator name..."
+                        placeholder="Enter photographer name..."
                         value={editingPhoto?.xmpCreator || ''}
                         onChange={(e) => handleMetadataChange('xmpCreator', e.target.value)}
                       />
@@ -980,114 +981,86 @@ function Project() {
                     {/* Rating */}
                     <div className="metadata-row editable">
                       <label className="metadata-label">Rating:</label>
-                      <div className="rating-input">
-                        {[1, 2, 3, 4, 5].map((star) => (
-                          <button
-                            key={star}
-                            type="button"
-                            className={`star-button ${(editingPhoto?.xmpRating || 0) >= star ? 'active' : ''}`}
-                            onClick={() => handleMetadataChange('xmpRating', star)}
-                          >
-                            ★
-                          </button>
-                        ))}
-                      </div>
+                      <select
+                        className="metadata-select"
+                        value={editingPhoto?.xmpRating || 0}
+                        onChange={(e) => handleMetadataChange('xmpRating', parseInt(e.target.value))}
+                      >
+                        <option value={0}>No Rating</option>
+                        <option value={1}>⭐</option>
+                        <option value={2}>⭐⭐</option>
+                        <option value={3}>⭐⭐⭐</option>
+                        <option value={4}>⭐⭐⭐⭐</option>
+                        <option value={5}>⭐⭐⭐⭐⭐</option>
+                      </select>
                     </div>
 
                     {/* Color Label */}
                     <div className="metadata-row editable">
                       <label className="metadata-label">Color Label:</label>
-                      <div className="color-label-input">
-                        {['None', 'Red', 'Yellow', 'Green', 'Blue', 'Purple'].map((color) => (
-                          <button
-                            key={color}
-                            type="button"
-                            className={`color-button ${(editingPhoto?.xmpColorLabel || 'None') === color ? 'active' : ''}`}
-                            onClick={() => handleMetadataChange('xmpColorLabel', color)}
-                            data-color={color}
-                          >
-                            {color}
-                          </button>
-                        ))}
-                      </div>
+                      <select
+                        className="metadata-select"
+                        value={editingPhoto?.xmpColorLabel || 'None'}
+                        onChange={(e) => handleMetadataChange('xmpColorLabel', e.target.value)}
+                      >
+                        <option value="None">None</option>
+                        <option value="Red">🔴 Red</option>
+                        <option value="Yellow">🟡 Yellow</option>
+                        <option value="Green">🟢 Green</option>
+                        <option value="Blue">🔵 Blue</option>
+                        <option value="Purple">🟣 Purple</option>
+                      </select>
                     </div>
                   </div>
 
-                  {/* Status display */}
-                  {saveStatus.type && (
-                    <div className={`metadata-status ${saveStatus.type}`}>
-                      <div className="status-icon">
-                        {saveStatus.type === 'success' ? '✅' : '❌'}
-                      </div>
-                      <div className="status-content">
-                        <div className="status-message">{saveStatus.message}</div>
-                        {saveStatus.xmpPath && (
-                          <div className="status-xmp-path">
-                            <strong>XMP file:</strong> {saveStatus.xmpPath}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Action buttons */}
+                  {/* Save Button */}
                   <div className="metadata-actions">
                     <button
-                      className="btn btn-primary"
                       onClick={handleSaveMetadata}
                       disabled={!hasMetadataChanges}
+                      className="btn btn-primary save-metadata-btn"
                     >
-                      💾 Save Changes
-                    </button>
-                    <button
-                      className="btn btn-secondary"
-                      onClick={handleResetMetadata}
-                      disabled={!hasMetadataChanges}
-                    >
-                      🔄 Reset
+                      {saveStatus.type === 'saving' ? 'Saving...' : 'Save Metadata'}
                     </button>
                   </div>
+
+                  {/* Save Status */}
+                  {saveStatus.type && (
+                    <div className={`save-status ${saveStatus.type}`}>
+                      <span className="status-icon">
+                        {saveStatus.type === 'success' ? '✅' : '⚠️'}
+                      </span>
+                      <span className="status-message">{saveStatus.message}</span>
+                      {saveStatus.xmpPath && (
+                        <div className="xmp-path">
+                          <small>XMP file: {saveStatus.xmpPath}</small>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
           )}
 
-          {/* Photo Grid Section */}
-          <div className={`photo-grid-section ${metadataPanelOpen ? 'panel-open' : ''}`}>
-            <div className="section-header">
-              <h2 className="section-title">Photos</h2>
-              {/* Current folder name display */}
-              {project?.folder_path && (
-                <div style={{fontSize: '14px', color: '#666', marginTop: '5px', fontStyle: 'italic'}}>
-                  📁 Current folder: {project.folder_path.split(/[\\/]/).pop() || 'Unknown'}
-                </div>
-              )}
-              
-              {/* Choose Folder Button */}
-              <button 
-                onClick={handleSelectFolder}
-                className="choose-folder-btn"
-              >
-                📁 Choose Different Folder
-              </button>
-              
-              {/* Chunk loading progress bar */}
-              {allPhotos.length > 0 && (
-                <div className="chunk-progress" style={{marginTop: '10px'}}>
-                  <div className="progress-bar">
-                    <div 
-                      className="progress-fill" 
-                      style={{
-                        width: `${(thumbnailCache.size / allPhotos.length) * 100}%`,
-                        transition: 'width 0.3s ease'
-                      }}
-                    ></div>
-                  </div>
-                  <div className="progress-text">
-                    {Math.round((thumbnailCache.size / allPhotos.length) * 100)}% loaded
-                  </div>
-                </div>
-              )}
+          {/* AutoTagger Section */}
+          <div className="auto-tagger-section">
+            <AutoTagger projectId={id} projectData={project} />
+          </div>
+
+          {/* Photos Section */}
+          <div className="photos-section">
+            <div className="photos-header">
+              <h2>📸 Photos</h2>
+              <div className="photos-actions">
+                <button
+                  onClick={handleSelectFolder}
+                  className="btn btn-secondary"
+                  disabled={photosLoading}
+                >
+                  {project?.folder_path ? 'Change Folder' : 'Select Folder'}
+                </button>
+              </div>
             </div>
 
             {photosLoading ? (
@@ -1180,8 +1153,6 @@ function Project() {
           </div>
         </div>
       )}
-
-
     </div>
   )
 }

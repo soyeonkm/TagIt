@@ -15,6 +15,8 @@ function CreateProject() {
     name: '',
     description: '',
     folder_path: '',
+    roster_type: 'url', // 'url' or 'file'
+    roster_data: '',
     metadata_config: {
       tags: [],
       categories: [],
@@ -27,6 +29,7 @@ function CreateProject() {
   const [errors, setErrors] = useState({
     name: '',
     folder_path: '',
+    roster_data: '',
     general: ''
   })
   const [success, setSuccess] = useState('');
@@ -48,6 +51,24 @@ function CreateProject() {
       setErrors(prev => ({
         ...prev,
         [name]: ''
+      }));
+    }
+  };
+
+  // Handle roster type change
+  const handleRosterTypeChange = (e) => {
+    const { value } = e.target;
+    setFormData(prev => ({
+      ...prev,
+      roster_type: value,
+      roster_data: '' // Clear roster data when type changes
+    }));
+    
+    // Clear roster data errors
+    if (errors.roster_data) {
+      setErrors(prev => ({
+        ...prev,
+        roster_data: ''
       }));
     }
   };
@@ -117,6 +138,15 @@ function CreateProject() {
       newErrors.folder_path = 'Please select a valid folder path';
     }
 
+    // Validate roster data if roster type is selected
+    if (formData.roster_type === 'url' && formData.roster_data.trim()) {
+      try {
+        new URL(formData.roster_data);
+      } catch {
+        newErrors.roster_data = 'Please enter a valid URL';
+      }
+    }
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -150,6 +180,8 @@ function CreateProject() {
         description: formData.description.trim() || 'New project',
         image_url: 'https://img.freepik.com/premium-vector/photographer-with-camera-flat-vector-illustration_648489-88.jpg',
         folder_path: formData.folder_path,
+        roster_type: formData.roster_type,
+        roster_data: formData.roster_data.trim() || null,
         metadata_config: formData.metadata_config
       };
 
@@ -192,7 +224,10 @@ function CreateProject() {
           user_id: user.id,
           name: formData.name.trim(),
           description: formData.description.trim() || 'New project',
-          image_url: 'https://img.freepik.com/premium-vector/photographer-with-camera-flat-vector-illustration_648489-88.jpg'
+          image_url: 'https://img.freepik.com/premium-vector/photographer-with-camera-flat-vector-illustration_648489-88.jpg',
+          folder_path: formData.folder_path,
+          roster_type: formData.roster_type,
+          roster_data: formData.roster_data.trim() || null
         };
         
         console.log('Debug - projectForBackend:', projectForBackend); // Debug log
@@ -330,6 +365,70 @@ function CreateProject() {
               rows="3"
             />
           </div>
+        </div>
+
+        {/* Roster Configuration */}
+        <div className="form-section">
+          <h2>Roster Configuration (Optional)</h2>
+          <p className="section-description">
+            Add roster information to enable automatic player tagging in photos
+          </p>
+          
+          <div className="form-group">
+            <label htmlFor="roster_type">Roster Type</label>
+            <select
+              id="roster_type"
+              name="roster_type"
+              value={formData.roster_type}
+              onChange={handleRosterTypeChange}
+            >
+              <option value="url">URL (Web page)</option>
+              <option value="file">File Upload</option>
+            </select>
+          </div>
+
+          {formData.roster_type === 'url' && (
+            <div className="form-group">
+              <label htmlFor="roster_data">Roster URL</label>
+              <input
+                type="url"
+                id="roster_data"
+                name="roster_data"
+                value={formData.roster_data}
+                onChange={handleInputChange}
+                placeholder="https://example.com/team-roster"
+                className={errors.roster_data ? 'error' : ''}
+              />
+              <small className="help-text">
+                Enter the URL of a webpage containing team roster information
+              </small>
+              {errors.roster_data && <span className="error-message">{errors.roster_data}</span>}
+            </div>
+          )}
+
+          {formData.roster_type === 'file' && (
+            <div className="form-group">
+              <label htmlFor="roster_data">Roster File</label>
+              <input
+                type="file"
+                id="roster_data"
+                name="roster_data"
+                accept=".csv,.xlsx,.txt"
+                onChange={(e) => {
+                  const file = e.target.files[0];
+                  if (file) {
+                    setFormData(prev => ({
+                      ...prev,
+                      roster_data: file.name
+                    }));
+                  }
+                }}
+              />
+              <small className="help-text">
+                Upload a CSV, Excel, or text file containing roster information
+              </small>
+            </div>
+          )}
         </div>
 
         {/* Folder Selection */}
