@@ -1,6 +1,5 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use reqwest::Client;
 use crate::config::Config;
 use crate::autotagger::{Player, PhotoMetadata};
 
@@ -31,6 +30,8 @@ pub struct Project {
     pub folder_path: Option<String>,
     pub roster_type: Option<String>,
     pub roster_data: Option<String>,
+    pub sport_type: Option<String>,
+    pub team_classification: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -42,6 +43,8 @@ pub struct CreateProjectRequest {
     pub folder_path: Option<String>,
     pub roster_type: Option<String>,
     pub roster_data: Option<String>,
+    pub sport_type: Option<String>,
+    pub team_classification: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -59,7 +62,6 @@ pub struct SupabaseService {
 impl SupabaseService {
     pub fn new() -> Result<Self> {
         let config = Config::new();
-        let client = Client::new();
 
         Ok(Self {
             supabase_url: config.supabase_url,
@@ -97,6 +99,13 @@ impl SupabaseService {
                     id: user["id"].as_str().unwrap_or("").to_string(),
                     email: user["email"].as_str().unwrap_or("").to_string(),
                     access_token,
+                })
+            } else if data.get("id").is_some() {
+                // Email confirmations are enabled, Supabase returns the user object directly
+                Ok(AuthUser {
+                    id: data["id"].as_str().unwrap_or("").to_string(),
+                    email: data["email"].as_str().unwrap_or("").to_string(),
+                    access_token: None, // No session until they confirm email
                 })
             } else {
                 Err(anyhow::anyhow!("Sign up failed: no user data"))
@@ -238,6 +247,8 @@ impl SupabaseService {
                 folder_path: None,
                 roster_type: project.roster_type,
                 roster_data: project.roster_data,
+                sport_type: project.sport_type,
+                team_classification: project.team_classification,
             }))
         } else {
             let error_text = response.text().await?;
@@ -263,6 +274,28 @@ impl SupabaseService {
         } else {
             let error_text = response.text().await?;
             Err(anyhow::anyhow!("Failed to update project: {}", error_text))
+        }
+    }
+
+    /// Update specific fields of a project using partial data
+    pub async fn update_project_partial(&self, project_id: &str, partial_data: serde_json::Value, access_token: &str) -> Result<()> {
+        let url = format!("{}/rest/v1/projects?id=eq.{}", self.supabase_url, project_id);
+
+        let response = reqwest::Client::new()
+            .patch(&url)
+            .header("apikey", &self.supabase_anon_key)
+            .header("Authorization", &format!("Bearer {}", access_token))
+            .header("Content-Type", "application/json")
+            .header("Prefer", "return=minimal")
+            .json(&partial_data)
+            .send()
+            .await?;
+
+        if response.status().is_success() {
+            Ok(())
+        } else {
+            let error_text = response.text().await?;
+            Err(anyhow::anyhow!("Failed to update project partially: {}", error_text))
         }
     }
 
@@ -308,7 +341,7 @@ impl SupabaseService {
     }
 
     // Get profile by user ID
-    pub async fn get_profile(&self, user_id: &str, access_token: &str) -> Result<Option<Profile>> {
+    pub async fn get_profile(&self, user_id: &str, _access_token: &str) -> Result<Option<Profile>> {
         let url = format!("{}/rest/v1/profiles?id=eq.{}", self.supabase_url, user_id);
 
         let response = reqwest::Client::new()
@@ -381,7 +414,11 @@ impl SupabaseService {
             "name": player.name,
             "jersey_number": player.jersey_number,
             "position": player.position,
-            "team": player.team
+            "team": player.team,
+            "school_name": player.school_name,
+            "sport_type": player.sport_type,
+            "face_image_base64": player.face_image_base64,
+            "face_descriptor": player.face_descriptor
         });
 
         let response = reqwest::Client::new()
@@ -399,6 +436,56 @@ impl SupabaseService {
         } else {
             let error_text = response.text().await?;
             Err(anyhow::anyhow!("Failed to create player: {}", error_text))
+        }
+    }
+
+    pub async fn upsert_player_by_name(&self, player: Player, project_id: &str, access_token: &str) -> Result<()> {
+        let name_encoded = urlencoding::encode(&player.name);
+        
+        let get_url = format!("{}/rest/v1/players?project_id=eq.{}&name=eq.{}", self.supabase_url, project_id, name_encoded);
+        let get_response = reqwest::Client::new()
+            .get(&get_url)
+            .header("apikey", &self.supabase_anon_key)
+            .header("Authorization", &format!("Bearer {}", access_token))
+            .send()
+            .await?;
+
+        let players: Vec<serde_json::Value> = get_response.json().await.unwrap_or_default();
+        
+        let player_data = serde_json::json!({
+            "project_id": project_id,
+            "name": player.name,
+            "jersey_number": player.jersey_number,
+            "position": player.position,
+            "team": player.team,
+            "school_name": player.school_name,
+            "sport_type": player.sport_type,
+            "face_image_base64": player.face_image_base64,
+            "face_descriptor": player.face_descriptor
+        });
+
+        if !players.is_empty() {
+            // Update
+            let patch_url = format!("{}/rest/v1/players?project_id=eq.{}&name=eq.{}", self.supabase_url, project_id, name_encoded);
+            let patch_response = reqwest::Client::new()
+                .patch(&patch_url)
+                .header("apikey", &self.supabase_anon_key)
+                .header("Authorization", &format!("Bearer {}", access_token))
+                .header("Content-Type", "application/json")
+                .header("Prefer", "return=minimal")
+                .json(&player_data)
+                .send()
+                .await?;
+                
+            if patch_response.status().is_success() {
+                Ok(())
+            } else {
+                let error_text = patch_response.text().await?;
+                Err(anyhow::anyhow!("Failed to update player: {}", error_text))
+            }
+        } else {
+            // Create
+            self.create_player(player, project_id, access_token).await
         }
     }
 
@@ -422,6 +509,7 @@ impl SupabaseService {
         }
     }
 
+    #[allow(dead_code)]
     pub async fn delete_player(&self, player_id: &str, access_token: &str) -> Result<()> {
         let url = format!("{}/rest/v1/players?id=eq.{}", self.supabase_url, player_id);
 
@@ -497,6 +585,7 @@ impl SupabaseService {
         }
     }
 
+    #[allow(dead_code)]
     pub async fn update_photo_metadata(&self, photo_id: &str, photo: PhotoMetadata, access_token: &str) -> Result<()> {
         let url = format!("{}/rest/v1/photos?id=eq.{}", self.supabase_url, photo_id);
 

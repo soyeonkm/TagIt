@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS players (
   jersey_number INTEGER,
   position TEXT,
   team TEXT,
+  image_url TEXT,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 

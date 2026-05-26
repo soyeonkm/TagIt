@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS players (
   jersey_number INTEGER,
   position TEXT,
   team TEXT,
+  image_url TEXT,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
@@ -209,3 +210,73 @@ SELECT
 FROM pg_policies 
 WHERE tablename IN ('players', 'photos')
 ORDER BY tablename, policyname;
+
+-- Safe Database Migration for TagIt - Add Sport Type and Team Classification
+-- This script safely adds new fields to existing databases without data loss
+-- Run this in your Supabase SQL Editor to upgrade existing installations
+
+-- Step 1: Add roster columns to existing projects table
+ALTER TABLE projects 
+ADD COLUMN IF NOT EXISTS roster_type TEXT,
+ADD COLUMN IF NOT EXISTS roster_data TEXT;
+
+-- Step 2: Set default roster_type for existing projects
+UPDATE projects 
+SET roster_type = 'url'
+WHERE roster_type IS NULL;
+
+-- Step 3: Make roster_type NOT NULL
+ALTER TABLE projects ALTER COLUMN roster_type SET NOT NULL;
+
+-- Step 4: Add CHECK constraint for roster_type
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.table_constraints 
+        WHERE constraint_name = 'projects_roster_type_check'
+    ) THEN
+        ALTER TABLE projects ADD CONSTRAINT projects_roster_type_check
+        CHECK (roster_type IN ('file', 'url'));
+    END IF;
+END $$;
+
+-- Step 5: Add new sport type and team classification fields to projects table
+ALTER TABLE projects 
+ADD COLUMN IF NOT EXISTS sport_type TEXT,
+ADD COLUMN IF NOT EXISTS team_classification TEXT;
+
+-- Step 6: Add CHECK constraint for team_classification
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.table_constraints 
+        WHERE constraint_name = 'projects_team_classification_check'
+    ) THEN
+        ALTER TABLE projects ADD CONSTRAINT projects_team_classification_check
+        CHECK (team_classification IN ('university', 'professional', 'amateur', 'other'));
+    END IF;
+END $$;
+
+-- Step 7: Add new fields to players table
+ALTER TABLE players 
+ADD COLUMN IF NOT EXISTS school_name TEXT,
+ADD COLUMN IF NOT EXISTS sport_type TEXT,
+ADD COLUMN IF NOT EXISTS image_url TEXT;
+
+-- Step 8: Create index for better query performance on sport_type
+CREATE INDEX IF NOT EXISTS idx_projects_sport_type ON projects(sport_type);
+CREATE INDEX IF NOT EXISTS idx_projects_team_classification ON projects(team_classification);
+CREATE INDEX IF NOT EXISTS idx_players_sport_type ON players(sport_type);
+CREATE INDEX IF NOT EXISTS idx_players_school_name ON players(school_name);
+
+-- Step 9: Update existing projects to have default team classification
+UPDATE projects 
+SET team_classification = 'other'
+WHERE team_classification IS NULL;
+
+-- Step 10: Update existing players to have default sport type from their project
+UPDATE players 
+SET sport_type = (
+    SELECT sport_type FROM projects WHERE projects.id = players.project_id
+)
+WHERE sport_type IS NULL;

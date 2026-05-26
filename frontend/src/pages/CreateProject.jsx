@@ -6,10 +6,10 @@ import { tauriSupabase, tauriUtils } from '../tauriClient';
 function CreateProject() {
   const navigate = useNavigate();
   const { user, isDevelopment, createMockProject, accessToken } = useAuth()
-  
+
   console.log('Debug - CreateProject component - user:', user); // Debug log
   console.log('Debug - CreateProject component - accessToken:', accessToken); // Debug log
-  
+
   // Form state
   const [formData, setFormData] = useState({
     name: '',
@@ -17,6 +17,8 @@ function CreateProject() {
     folder_path: '',
     roster_type: 'url', // 'url' or 'file'
     roster_data: '',
+    sport_type: '',
+    team_classification: 'other', // 'university', 'professional', 'amateur', 'other'
     metadata_config: {
       tags: [],
       categories: [],
@@ -45,7 +47,7 @@ function CreateProject() {
       ...prev,
       [name]: value
     }));
-    
+
     // Clear errors for this field
     if (errors[name]) {
       setErrors(prev => ({
@@ -63,7 +65,7 @@ function CreateProject() {
       roster_type: value,
       roster_data: '' // Clear roster data when type changes
     }));
-    
+
     // Clear roster data errors
     if (errors.roster_data) {
       setErrors(prev => ({
@@ -77,7 +79,7 @@ function CreateProject() {
   const handleSelectFolder = async () => {
     setSelectingFolder(true);
     setErrors(prev => ({ ...prev, folder_path: '' }));
-    
+
     try {
       if (isDevelopment) {
         // Mock folder selection for development
@@ -95,12 +97,12 @@ function CreateProject() {
       } else {
         // Use Tauri folder selection
         const { data, error } = await tauriUtils.selectFolderWithInfo();
-        
+
         if (error) {
           setErrors(prev => ({ ...prev, folder_path: error.message }));
           return;
         }
-        
+
         if (data) {
           setFormData(prev => ({
             ...prev,
@@ -111,9 +113,9 @@ function CreateProject() {
         }
       }
     } catch (error) {
-      setErrors(prev => ({ 
-        ...prev, 
-        folder_path: 'Failed to select folder. Please try again.' 
+      setErrors(prev => ({
+        ...prev,
+        folder_path: 'Failed to select folder. Please try again.'
       }));
     } finally {
       setSelectingFolder(false);
@@ -128,11 +130,11 @@ function CreateProject() {
     if (!formData.name.trim()) {
       newErrors.name = 'Project name is required';
     }
-    
+
     if (!formData.folder_path) {
       newErrors.folder_path = 'Project folder is required';
     }
-    
+
     // Validate folder path format
     if (formData.folder_path && !formData.folder_path.includes('/') && !formData.folder_path.includes('\\')) {
       newErrors.folder_path = 'Please select a valid folder path';
@@ -154,16 +156,16 @@ function CreateProject() {
   // Handle form submission
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
+
     if (!validateForm()) {
       return;
     }
 
     // Check if user is authenticated
     if (!user || (!accessToken && !isDevelopment)) {
-      setErrors(prev => ({ 
-        ...prev, 
-        general: 'You must be signed in to create a project. Please sign in first.' 
+      setErrors(prev => ({
+        ...prev,
+        general: 'You must be signed in to create a project. Please sign in first.'
       }));
       return;
     }
@@ -182,6 +184,8 @@ function CreateProject() {
         folder_path: formData.folder_path,
         roster_type: formData.roster_type,
         roster_data: formData.roster_data.trim() || null,
+        sport_type: formData.sport_type.trim() || null,
+        team_classification: formData.team_classification,
         metadata_config: formData.metadata_config
       };
 
@@ -191,15 +195,15 @@ function CreateProject() {
         if (!projectData.user_id) missingFields.push('user_id');
         if (!projectData.name) missingFields.push('name');
         if (!projectData.folder_path) missingFields.push('folder_path');
-        
+
         throw new Error(`Missing required fields: ${missingFields.join(', ')}`);
       }
-      
+
       // Ensure user_id is a valid UUID format
       if (typeof projectData.user_id !== 'string' || projectData.user_id.length < 10) {
         throw new Error('Invalid user ID format');
       }
-      
+
       // Ensure metadata_config is a valid object
       if (projectData.metadata_config && typeof projectData.metadata_config !== 'object') {
         throw new Error('Invalid metadata config format');
@@ -214,11 +218,11 @@ function CreateProject() {
         // Use Tauri backend to create project
         console.log('Debug - accessToken:', accessToken); // Debug log
         console.log('Debug - projectData:', projectData); // Debug log
-        
+
         if (!accessToken) {
           throw new Error('Access token is missing. Please sign in again.');
         }
-        
+
         // Create the project data structure that matches CreateProjectRequest
         const projectForBackend = {
           user_id: user.id,
@@ -227,19 +231,21 @@ function CreateProject() {
           image_url: 'https://img.freepik.com/premium-vector/photographer-with-camera-flat-vector-illustration_648489-88.jpg',
           folder_path: formData.folder_path,
           roster_type: formData.roster_type,
-          roster_data: formData.roster_data.trim() || null
+          roster_data: formData.roster_data.trim() || null,
+          sport_type: formData.sport_type.trim() || null,
+          team_classification: formData.team_classification
         };
-        
+
         console.log('Debug - projectForBackend:', projectForBackend); // Debug log
-        
+
         try {
           // Use the Tauri invoke command directly instead of tauriSupabase
           const { invoke } = await import('@tauri-apps/api/core');
-          const createdProject = await invoke('create_project', { 
-            project: projectForBackend, 
-            accessToken 
+          const createdProject = await invoke('create_project', {
+            project: projectForBackend,
+            accessToken
           });
-          
+
           console.log('Debug - Tauri create_project result:', createdProject); // Debug log
           result = { data: [createdProject], error: null };
         } catch (invokeError) {
@@ -257,7 +263,7 @@ function CreateProject() {
       if (result.data && result.data[0]) {
         const createdProject = result.data[0];
         console.log('Created project:', createdProject); // Debug log
-        
+
         if (createdProject.id) {
           setSuccess('Project created successfully!');
           // Navigate to the project page after a short delay
@@ -275,7 +281,7 @@ function CreateProject() {
         // Handle case where result.data is a single project object
         const createdProject = result.data;
         console.log('Created project (single object):', createdProject); // Debug log
-        
+
         if (createdProject.id) {
           setSuccess('Project created successfully!');
           setTimeout(() => {
@@ -298,7 +304,7 @@ function CreateProject() {
       }
     } catch (error) {
       console.error('Project creation error:', error); // Debug log
-      
+
       // Provide more specific error messages
       let errorMessage = error.message;
       if (error.message.includes('id') && error.message.includes('null value')) {
@@ -308,9 +314,9 @@ function CreateProject() {
       } else if (error.message.includes('required fields')) {
         errorMessage = `Validation error: ${error.message}`;
       }
-      
-      setErrors(prev => ({ 
-        ...prev, 
+
+      setErrors(prev => ({
+        ...prev,
         general: errorMessage
       }));
     } finally {
@@ -339,7 +345,7 @@ function CreateProject() {
         {/* General Information */}
         <div className="form-section">
           <h2>Project Information</h2>
-          
+
           <div className="form-group">
             <label htmlFor="name">Project Name *</label>
             <input
@@ -373,7 +379,7 @@ function CreateProject() {
           <p className="section-description">
             Add roster information to enable automatic player tagging in photos
           </p>
-          
+
           <div className="form-group">
             <label htmlFor="roster_type">Roster Type</label>
             <select
@@ -382,12 +388,12 @@ function CreateProject() {
               value={formData.roster_type}
               onChange={handleRosterTypeChange}
             >
-              <option value="url">URL (Web page)</option>
-              <option value="file">File Upload</option>
+              {/* <option value="url">URL (Web page)</option> */}
+              <option value="file">PDF File Upload</option>
             </select>
           </div>
 
-          {formData.roster_type === 'url' && (
+          {/* {formData.roster_type === 'url' && (
             <div className="form-group">
               <label htmlFor="roster_data">Roster URL</label>
               <input
@@ -404,7 +410,7 @@ function CreateProject() {
               </small>
               {errors.roster_data && <span className="error-message">{errors.roster_data}</span>}
             </div>
-          )}
+          )} */}
 
           {formData.roster_type === 'file' && (
             <div className="form-group">
@@ -413,7 +419,7 @@ function CreateProject() {
                 type="file"
                 id="roster_data"
                 name="roster_data"
-                accept=".csv,.xlsx,.txt"
+                accept=".pdf"
                 onChange={(e) => {
                   const file = e.target.files[0];
                   if (file) {
@@ -425,16 +431,50 @@ function CreateProject() {
                 }}
               />
               <small className="help-text">
-                Upload a CSV, Excel, or text file containing roster information
+                Upload a PDF file containing roster information
               </small>
             </div>
           )}
+
+          {/* Sport and Team Information */}
+          <div className="form-group">
+            <label htmlFor="sport_type">Sport Type</label>
+            <input
+              type="text"
+              id="sport_type"
+              name="sport_type"
+              value={formData.sport_type}
+              onChange={handleInputChange}
+              placeholder="e.g., Basketball, Football, Soccer"
+            />
+            <small className="help-text">
+              The type of sport for this team (will be auto-detected from roster)
+            </small>
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="team_classification">Team Classification</label>
+            <select
+              id="team_classification"
+              name="team_classification"
+              value={formData.team_classification}
+              onChange={handleInputChange}
+            >
+              <option value="other">Other</option>
+              <option value="university">University/College</option>
+              <option value="professional">Professional</option>
+              <option value="amateur">Amateur/Recreational</option>
+            </select>
+            <small className="help-text">
+              The type of team organization (will be auto-detected from roster URL)
+            </small>
+          </div>
         </div>
 
         {/* Folder Selection */}
         <div className="form-section">
           <h2>Project Folder</h2>
-          
+
           <div className="form-group">
             <label>Project Folder *</label>
             <div className="folder-selection">
@@ -446,7 +486,7 @@ function CreateProject() {
               >
                 {selectingFolder ? 'Selecting...' : (isDevelopment ? 'Select Mock Folder' : 'Select Folder')}
               </button>
-              
+
               {formData.folder_path && (
                 <div className="selected-folder">
                   <span className="folder-icon">📁</span>
@@ -455,7 +495,7 @@ function CreateProject() {
               )}
             </div>
             {errors.folder_path && <span className="error-message">{errors.folder_path}</span>}
-            
+
             {folderInfo && (
               <div className="folder-info">
                 <div className="info-item">

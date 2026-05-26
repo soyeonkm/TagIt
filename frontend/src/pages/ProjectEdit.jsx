@@ -17,10 +17,10 @@ function ProjectEdit() {
   const [metadataType, setMetadataType] = useState('description')
   const [informationType, setInformationType] = useState('player_name')
   
-  // Roster upload state
-  const [rosterType, setRosterType] = useState('file')
-  const [rosterFile, setRosterFile] = useState(null)
-  const [rosterUrl, setRosterUrl] = useState('')
+  // Roster state
+  const [rosterFile, setRosterFile] = useState(null) // display name only
+  const [rosterSuccess, setRosterSuccess] = useState('')
+  const [rosterError, setRosterError] = useState('')
 
   useEffect(() => {
     if (id) {
@@ -119,117 +119,40 @@ function ProjectEdit() {
     }
   }
 
-  const handleSaveAll = async () => {
-    setSaving(true);
-    
-    try {
-      const updatedProject = { ...project };
-      
-      // Update metadata configuration
-      if (!updatedProject.metadata_config) {
-        updatedProject.metadata_config = {};
-      }
-      updatedProject.metadata_config[metadataType] = informationType;
-      
-      // Update roster configuration
-      if (!updatedProject.roster_config) {
-        updatedProject.roster_config = {};
-      }
-      updatedProject.roster_config.type = rosterType;
-      if (rosterType === 'file' && rosterFile) {
-        updatedProject.roster_config.file_name = rosterFile.name;
-        updatedProject.roster_config.file_size = rosterFile.size;
-      } else if (rosterType === 'url' && rosterUrl.trim()) {
-        updatedProject.roster_config.url = rosterUrl.trim();
-      }
-      
-      if (isDevelopment) {
-        // Mock update - just update local state
-        setProject(updatedProject);
-        console.log('Mock updated project configuration:', updatedProject);
-        alert('Configuration saved successfully (mock)');
-      } else {
-        // Use Tauri backend to update project
-        const { invoke } = await import('@tauri-apps/api/core');
-        await invoke('update_project', { 
-          projectId: project.id, 
-          project: updatedProject, 
-          accessToken 
-        });
-        
-        setProject(updatedProject);
-        console.log('Project configuration updated successfully');
-        alert('Configuration saved successfully');
-      }
-      
-      // Reset form states
-      setRosterFile(null);
-      setRosterUrl('');
-    } catch (error) {
-      console.error('Error updating project configuration:', error);
-      alert('Failed to save configuration. Please try again.');
-    } finally {
-      setSaving(false);
-    }
-  }
-
   const handleRosterUpload = async () => {
-    if (rosterType === 'file' && !rosterFile) {
-      alert('Please select a file to upload');
-      return;
-    }
-    
-    if (rosterType === 'url' && !rosterUrl.trim()) {
-      alert('Please enter a valid URL');
-      return;
-    }
-    
-    setUploadingRoster(true);
-    
-    try {
-      if (isDevelopment) {
-        // Mock roster upload
-        console.log('Mock uploading roster:', { type: rosterType, file: rosterFile, url: rosterUrl });
-        alert('Roster uploaded successfully (mock)');
-      } else {
-        // Use Tauri backend to upload roster
-        const { invoke } = await import('@tauri-apps/api/core');
-        
-        if (rosterType === 'file') {
-          // Handle file upload
-          await invoke('upload_roster_file', { 
-            projectId: project.id, 
-            filePath: rosterFile.path, 
-            accessToken 
-          });
-        } else {
-          // Handle URL upload
-          await invoke('upload_roster_url', { 
-            projectId: project.id, 
-            url: rosterUrl, 
-            accessToken 
-          });
-        }
-        
-        console.log('Roster uploaded successfully');
-        alert('Roster uploaded successfully');
-      }
-      
-      // Reset form
-      setRosterFile(null);
-      setRosterUrl('');
-    } catch (error) {
-      console.error('Error uploading roster:', error);
-      alert('Failed to upload roster. Please try again.');
-    } finally {
-      setUploadingRoster(false);
-    }
-  }
+    setRosterError('')
+    setRosterSuccess('')
+    setUploadingRoster(true)
 
-  const handleFileSelect = (event) => {
-    const file = event.target.files[0];
-    if (file) {
-      setRosterFile(file);
+    try {
+      const { invoke } = await import('@tauri-apps/api/core')
+
+      // Open native PDF file picker
+      let pdfPath
+      try {
+        pdfPath = await invoke('select_pdf_file')
+      } catch (_cancelled) {
+        setUploadingRoster(false)
+        return
+      }
+
+      setRosterFile(pdfPath.split(/[\\/]/).pop())
+
+      const result = await invoke('parse_roster_from_pdf', {
+        pdfPath,
+        projectId: project.id,
+        accessToken
+      })
+
+      if (result.success) {
+        setRosterSuccess(`✅ Parsed ${result.players.length} players from roster PDF`)
+      } else {
+        setRosterError(`Failed: ${result.error_message || 'Unknown error'}`)
+      }
+    } catch (error) {
+      setRosterError(`Error: ${error}`)
+    } finally {
+      setUploadingRoster(false)
     }
   }
 
@@ -336,67 +259,54 @@ function ProjectEdit() {
             </div>
           </div>
 
-          {/* Roster Upload Section */}
+          {/* Roster Upload Section — PDF only */}
           <div className="edit-section">
-            <h2>Upload Roster</h2>
-            <div className="roster-uploader">
-              <div className="roster-type-selector">
-                <label>Upload Method</label>
-                <div className="roster-toggle">
-                  <button
-                    type="button"
-                    onClick={() => setRosterType('file')}
-                    className={`toggle-btn ${rosterType === 'file' ? 'active' : ''}`}
-                  >
-                    📁 File Upload
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setRosterType('url')}
-                    className={`toggle-btn ${rosterType === 'url' ? 'active' : ''}`}
-                  >
-                    🌐 URL Input
-                  </button>
-                </div>
+            <h2>📄 Upload Roster PDF</h2>
+            <p style={{ color: '#6b7280', marginBottom: '16px', fontSize: '0.95rem' }}>
+              Upload your team roster as a PDF. Gemini Vision AI will extract player names,
+              jersey numbers, positions and headshots automatically.
+            </p>
+            <div className="pdf-upload-area">
+              <div className="pdf-upload-icon">📄</div>
+              <div className="pdf-upload-info">
+                {rosterFile ? (
+                  <span className="pdf-selected-name">📎 {rosterFile}</span>
+                ) : (
+                  <span className="pdf-upload-hint">No PDF selected yet</span>
+                )}
               </div>
-
-              {rosterType === 'file' && (
-                <div className="file-upload-section">
-                  <label>Select Roster File</label>
-                  <input
-                    type="file"
-                    accept=".csv,.xlsx,.xls,.txt"
-                    onChange={handleFileSelect}
-                    className="file-input"
-                  />
-                  {rosterFile && (
-                    <div className="file-info">
-                      <span className="file-icon">📄</span>
-                      <span className="file-name">{rosterFile.name}</span>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {rosterType === 'url' && (
-                <div className="url-input-section">
-                  <label>Roster URL</label>
-                  <input
-                    type="url"
-                    value={rosterUrl}
-                    onChange={(e) => setRosterUrl(e.target.value)}
-                    placeholder="https://example.com/roster.csv"
-                    className="url-input"
-                  />
-                </div>
-              )}
+              <button
+                className="btn btn-primary pdf-upload-btn"
+                onClick={handleRosterUpload}
+                disabled={uploadingRoster}
+              >
+                {uploadingRoster ? (
+                  <><span className="btn-spinner" /> Parsing…</>
+                ) : (
+                  '📂 Upload & Parse PDF'
+                )}
+              </button>
             </div>
+
+            {rosterError && (
+              <div className="error-message" style={{ marginTop: '12px' }}>
+                <span className="error-icon">⚠️</span>
+                <span>{rosterError}</span>
+                <button className="clear-btn" onClick={() => setRosterError('')}>✕</button>
+              </div>
+            )}
+            {rosterSuccess && (
+              <div className="success-message" style={{ marginTop: '12px' }}>
+                <span className="success-icon">✅</span>
+                <span>{rosterSuccess}</span>
+              </div>
+            )}
           </div>
 
           {/* Project Actions - At the very bottom of the page */}
           <div className="project-actions">
             <button
-              onClick={handleSaveAll}
+              onClick={handleMetadataEdit}
               disabled={saving}
               className="btn btn-primary"
             >

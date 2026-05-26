@@ -2,6 +2,7 @@ mod config;
 mod supabase;
 mod autotagger;
 mod error;
+mod insightface;
 
 use anyhow::Result;
 use std::fs;
@@ -10,7 +11,7 @@ use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use rfd::FileDialog;
 
 use supabase::{SupabaseService, AuthUser, Profile, Project, CreateProjectRequest};
-use autotagger::{AutoTagger, Player, PhotoMetadata};
+use autotagger::{AutoTagger, Player, PhotoMetadata, ParsingResult};
 
 
 // Tauri commands for authentication
@@ -125,6 +126,19 @@ async fn select_folder() -> Result<String, String> {
             Err(error_msg.to_string())
         }
     }
+}
+
+/// Open a native file picker dialog filtered to PDF files.
+/// Returns the absolute path of the selected file, or an error if cancelled.
+#[tauri::command]
+async fn select_pdf_file() -> Result<String, String> {
+    let file_path = FileDialog::new()
+        .set_title("Select Roster PDF")
+        .add_filter("PDF Roster", &["pdf"])
+        .pick_file()
+        .ok_or("No file selected")?;
+
+    Ok(file_path.to_string_lossy().to_string())
 }
 
 // Alternative command that returns more detailed information
@@ -672,26 +686,42 @@ async fn update_photo_metadata(file_path: String, metadata: serde_json::Value) -
     Ok(serde_json::Value::Object(response))
 }
 
-// New Tauri commands for automatic tagging
+// PDF Roster Parsing command
 #[tauri::command]
-async fn parse_roster_from_url(
-    url: String,
+async fn parse_roster_from_pdf(
+    pdf_path: String,
     project_id: String,
     access_token: String,
-) -> Result<Vec<Player>, String> {
+) -> Result<ParsingResult, String> {
     let supabase = SupabaseService::new().map_err(|e| e.to_string())?;
-    
-    // Parse roster from URL
+
     let autotagger = AutoTagger::new(supabase.clone()).map_err(|e| e.to_string())?;
-    let players = autotagger.parse_roster_from_url(&url).await.map_err(|e| e.to_string())?;
-    
-    // Save players to database
-    for player in &players {
-        supabase.create_player(player.clone(), &project_id, &access_token).await
-            .map_err(|e| e.to_string())?;
+    let parsing_result = autotagger.parse_roster_from_pdf(&pdf_path).await.map_err(|e| e.to_string())?;
+
+    if parsing_result.success && !parsing_result.players.is_empty() {
+        // Update project with sport/classification info from first player
+        if let Some(first_player) = parsing_result.players.first() {
+            let mut project_update = serde_json::json!({});
+            if let Some(sport) = &first_player.sport_type {
+                project_update["sport_type"] = serde_json::Value::String(sport.clone());
+            }
+            let classification = if first_player.school_name.is_some() {
+                "university"
+            } else {
+                "other"
+            };
+            project_update["team_classification"] = serde_json::Value::String(classification.to_string());
+            let _ = supabase.update_project_partial(&project_id, project_update, &access_token).await;
+        }
+
+        // Save all players (including face data) to database
+        for player in &parsing_result.players {
+            supabase.upsert_player_by_name(player.clone(), &project_id, &access_token).await
+                .map_err(|e| e.to_string())?;
+        }
     }
-    
-    Ok(players)
+
+    Ok(parsing_result)
 }
 
 #[tauri::command]
@@ -703,7 +733,7 @@ async fn process_photo_folder(
     let supabase = SupabaseService::new().map_err(|e| e.to_string())?;
     let autotagger = AutoTagger::new(supabase.clone()).map_err(|e| e.to_string())?;
     
-    let results = autotagger.process_photo_folder(&project_id, &folder_path).await
+    let results = autotagger.process_photo_folder(&project_id, &folder_path, &access_token).await
         .map_err(|e| e.to_string())?;
     
     // Save photo metadata to database
@@ -753,13 +783,14 @@ pub fn run() {
             update_password,
             select_folder,
             select_folder_with_info,
+            select_pdf_file,
             read_project_folder,
             get_image_data_url,
             get_image_thumbnail,
             read_photo_metadata,
             update_photo_metadata,
-            // New autotagger commands
-            parse_roster_from_url,
+            // Autotagger commands
+            parse_roster_from_pdf,
             process_photo_folder,
             get_project_players,
             get_project_photos

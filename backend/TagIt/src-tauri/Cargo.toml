@@ -30,7 +30,10 @@ rfd = "0.15"
 image = { version = "0.24", features = ["jpeg", "png", "gif", "bmp", "webp", "tiff"] }
 base64 = "0.21"
 rawloader = "0.37"
-# HTML parsing for roster extraction
+# PDF parsing for roster extraction
+pdf-extract = "0.7"
+lopdf = "0.31"
+# HTML parsing (kept for other uses)
 scraper = "0.18"
 # Image processing utilities
 imageproc = "0.23"
@@ -50,4 +53,9 @@ ask_gemini = "0.1"
 
 # [target.x86_64-pc-windows-gnu]
 # linker = "x86_64-w64-mingw32-gcc"
+
+# for buffalo_l integration
+ort = "2.0.0-rc.2" # ONNX Runtime for Rust
+ndarray = "0.15.6" # For tensor manipulation
+urlencoding = "2.1.3"
 

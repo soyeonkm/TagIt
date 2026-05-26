@@ -10,6 +10,8 @@ CREATE TABLE IF NOT EXISTS projects (
   folder_path TEXT,
   roster_type TEXT NOT NULL CHECK (roster_type IN ('file', 'url')) DEFAULT 'url',
   roster_data TEXT,
+  sport_type TEXT,
+  team_classification TEXT CHECK (team_classification IN ('university', 'professional', 'amateur', 'other')),
   metadata_config JSONB DEFAULT '{}',
   description TEXT,
   image_url TEXT,
@@ -25,6 +27,9 @@ CREATE TABLE IF NOT EXISTS players (
   jersey_number INTEGER,
   position TEXT,
   team TEXT,
+  school_name TEXT,
+  sport_type TEXT,
+  image_url TEXT,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
