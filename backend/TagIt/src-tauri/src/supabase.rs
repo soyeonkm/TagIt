@@ -532,7 +532,7 @@ impl SupabaseService {
 
     // Photo metadata management methods
     pub async fn save_photo_metadata(&self, photo: PhotoMetadata, project_id: &str, access_token: &str) -> Result<()> {
-        let url = format!("{}/rest/v1/photos", self.supabase_url);
+        let url = format!("{}/rest/v1/photos?on_conflict=project_id,file_path", self.supabase_url);
 
         let photo_data = serde_json::json!({
             "project_id": project_id,
@@ -552,7 +552,7 @@ impl SupabaseService {
             .header("apikey", &self.supabase_anon_key)
             .header("Authorization", &format!("Bearer {}", access_token))
             .header("Content-Type", "application/json")
-            .header("Prefer", "return=minimal")
+            .header("Prefer", "resolution=merge-duplicates, return=minimal")
             .json(&photo_data)
             .send()
             .await?;

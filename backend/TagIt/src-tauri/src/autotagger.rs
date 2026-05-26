@@ -8,7 +8,8 @@ use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 
 // ─── Core Player Struct ──────────────────────────────────────────────────────
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[serde(default)]
 pub struct Player {
     pub name: String,
     pub jersey_number: Option<i32>,
@@ -269,8 +270,6 @@ Your task:
    - Team classification: "university", "professional", "amateur", or "other"
    - School name (if university team, otherwise null)
    - Team name (if professional team, otherwise null)
-   - Whether the player has a headshot/photo visible next to their entry (true/false)
-   - A brief physical appearance description IF a headshot is visible (e.g. "young male, dark hair, medium build, jersey #23"). Otherwise null.
 3. Only include actual players — NOT coaches, staff, or managers.
 
 Return ONLY valid JSON in exactly this format, no extra text:
@@ -283,16 +282,12 @@ Return ONLY valid JSON in exactly this format, no extra text:
     {{
       "name": "John Smith",
       "jersey_number": 23,
-      "position": "Forward",
-      "has_headshot": true,
-      "face_descriptor": "young male, dark curly hair, light skin, #23 jersey"
+      "position": "Forward"
     }},
     {{
       "name": "Mike Johnson",
       "jersey_number": 11,
-      "position": "Guard",
-      "has_headshot": false,
-      "face_descriptor": null
+      "position": "Guard"
     }}
   ]
 }}
@@ -450,9 +445,86 @@ Supplementary extracted text from PDF (use as reference):
         Ok(Vec::new())
     }
 
-    /// Detect jersey numbers in a photo — placeholder.
-    fn detect_jersey_numbers(&self, _image: &DynamicImage) -> Result<Vec<DetectedJerseyNumber>, AppError> {
-        Ok(Vec::new())
+    /// Detect jersey numbers in a photo using Gemini Vision.
+    async fn detect_jersey_numbers(&self, image_bytes: &[u8], mime_type: &str) -> Result<Vec<DetectedJerseyNumber>, AppError> {
+        let api_key = match &self.gemini_api_key {
+            Some(key) => key,
+            None => {
+                log::warn!("GEMINI_API_KEY not set. Skipping jersey number detection.");
+                return Ok(Vec::new());
+            }
+        };
+
+        let url = format!(
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key={}",
+            api_key
+        );
+
+        let img_b64 = BASE64.encode(image_bytes);
+
+        let prompt = "Identify all visible sports jersey numbers on the players in this image. Return ONLY a valid JSON array of strings representing the detected jersey numbers (e.g., [\"12\", \"5\", \"88\"]). Exclude random numbers, scoreboards, or other text. If no jersey numbers are clearly visible, return an empty array [].";
+
+        let body = serde_json::json!({
+            "contents": [{
+                "parts": [
+                    {
+                        "inline_data": {
+                            "mime_type": mime_type,
+                            "data": img_b64
+                        }
+                    },
+                    {
+                        "text": prompt
+                    }
+                ]
+            }],
+            "generationConfig": {
+                "temperature": 0.1,
+                "responseMimeType": "application/json"
+            }
+        });
+
+        let client = reqwest::Client::new();
+        let response = client
+            .post(&url)
+            .header("Content-Type", "application/json")
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| AppError::Internal(format!("Gemini API request failed: {}", e)))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let error_text = response.text().await.unwrap_or_default();
+            log::warn!("Gemini API error during jersey detection: {} - {}", status, error_text);
+            return Ok(Vec::new()); // Fallback to no detections on error
+        }
+
+        let resp_json: serde_json::Value = response.json().await
+            .map_err(|e| AppError::Internal(format!("Failed to parse Gemini response: {}", e)))?;
+
+        let text = resp_json["candidates"][0]["content"]["parts"][0]["text"]
+            .as_str()
+            .unwrap_or("[]");
+
+        let numbers: Vec<String> = match serde_json::from_str(text) {
+            Ok(nums) => nums,
+            Err(e) => {
+                log::warn!("Failed to parse JSON from Gemini: {}", e);
+                Vec::new()
+            }
+        };
+
+        let detected = numbers.into_iter().map(|number| DetectedJerseyNumber {
+            x: 0,
+            y: 0,
+            width: 0,
+            height: 0,
+            number,
+            confidence: 1.0,
+        }).collect();
+
+        Ok(detected)
     }
 
     /// Process a folder of photos and tag them automatically
@@ -501,8 +573,17 @@ Supplementary extracted text from PDF (use as reference):
             .unwrap_or("unknown")
             .to_string();
 
+        let image_bytes = fs::read(file_path)?;
+        let mime_type = match file_path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase().as_str() {
+            "png" => "image/png",
+            "webp" => "image/webp",
+            "heic" => "image/heic",
+            "heif" => "image/heif",
+            _ => "image/jpeg",
+        };
+
         let detected_faces = self.detect_faces(&image)?;
-        let detected_jersey_numbers = self.detect_jersey_numbers(&image)?;
+        let detected_jersey_numbers = self.detect_jersey_numbers(&image_bytes, mime_type).await?;
 
         let detected_players = self.match_players_with_detections(
             project_id,
