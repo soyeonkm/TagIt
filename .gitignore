@@ -240,3 +240,10 @@ build/
 # CI/CD
 .cache/
 .parcel-cache/
+
+# ========================================
+# MACHINE LEARNING MODELS
+# ========================================
+
+*.onnx
+models/
