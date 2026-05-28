@@ -19,21 +19,50 @@ function AutoTagger({ projectId, projectData }) {
   const [photoResults, setPhotoResults] = useState([]);
   const [photoError, setPhotoError] = useState('');
   const [photoSuccess, setPhotoSuccess] = useState('');
+  const [selectedSport, setSelectedSport] = useState('');
+  const [selectedSchool, setSelectedSchool] = useState('');
+  const [selectedSeason, setSelectedSeason] = useState(new Date().getFullYear().toString());
 
   // ── General state ─────────────────────────────────────────────────────────
   const [players, setPlayers] = useState([]);
   const [photos, setPhotos] = useState([]);
+  const [globalSports, setGlobalSports] = useState([]);
+  const [globalSchools, setGlobalSchools] = useState([]);
+  const [globalSeasons, setGlobalSeasons] = useState([]);
 
   useEffect(() => {
-    if (projectId && accessToken) {
+    if (projectId && accessToken && projectData?.user_id) {
       loadProjectData();
+      loadGlobalFilterOptions();
     }
-  }, [projectId, accessToken]);
+  }, [projectId, accessToken, projectData]);
+
+  const loadGlobalFilterOptions = async () => {
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      const options = await invoke('get_filter_options', {
+        userId: projectData.user_id,
+        accessToken
+      });
+
+      if (options.sports && options.sports.length > 0) {
+        setGlobalSports(options.sports);
+      }
+      if (options.schools && options.schools.length > 0) {
+        setGlobalSchools(options.schools);
+      }
+      if (options.seasons && options.seasons.length > 0) {
+        setGlobalSeasons(options.seasons.map(s => s.toString()));
+      }
+    } catch (error) {
+      console.error('Failed to load global filter options:', error);
+    }
+  };
 
   const loadProjectData = async () => {
     try {
       const { invoke } = await import('@tauri-apps/api/core');
-      const playersData = await invoke('get_project_players', { projectId, accessToken });
+      const playersData = await invoke('get_all_players', { userId: projectData.user_id, accessToken });
       setPlayers(playersData);
       const photosData = await invoke('get_project_photos', { projectId, accessToken });
       setPhotos(photosData);
@@ -65,6 +94,7 @@ function AutoTagger({ projectId, projectData }) {
       const result = await invoke('parse_roster_from_pdf', {
         pdfPath,
         projectId,
+        userId: projectData.user_id,
         accessToken,
       });
 
@@ -111,6 +141,7 @@ function AutoTagger({ projectId, projectData }) {
       const { invoke } = await import('@tauri-apps/api/core');
       const results = await invoke('process_photo_folder', {
         projectId,
+        userId: projectData.user_id,
         folderPath: projectData.folder_path,
         accessToken,
       });
@@ -272,6 +303,63 @@ function AutoTagger({ projectId, projectData }) {
         <h3>📸 Photo Processing</h3>
         <p>Process photos in your project folder to automatically detect and tag players</p>
 
+        <div className="processing-filters" style={{ display: 'flex', gap: '15px', marginBottom: '20px', flexWrap: 'wrap' }}>
+          <div className="filter-group" style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+            <label style={{ fontSize: '0.9em', fontWeight: 'bold' }}>Sport:</label>
+            <select
+              value={selectedSport}
+              onChange={(e) => setSelectedSport(e.target.value)}
+              className="form-select"
+              style={{ padding: '8px', borderRadius: '4px', border: '1px solid #ccc', minWidth: '150px' }}
+            >
+              <option value="">Select Sport</option>
+              {globalSports.map((sport, i) => (
+                <option key={i} value={sport}>{sport}</option>
+              ))}
+              <option value="Other">Other</option>
+            </select>
+          </div>
+
+          <div className="filter-group" style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+            <label style={{ fontSize: '0.9em', fontWeight: 'bold' }}>School:</label>
+            <select
+              value={selectedSchool}
+              onChange={(e) => setSelectedSchool(e.target.value)}
+              className="form-select"
+              style={{ padding: '8px', borderRadius: '4px', border: '1px solid #ccc', minWidth: '200px' }}
+            >
+              <option value="">Select School</option>
+              {globalSchools.map((school, i) => (
+                <option key={i} value={school}>{school}</option>
+              ))}
+              <option value="Other">Other</option>
+            </select>
+          </div>
+
+          <div className="filter-group" style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+            <label style={{ fontSize: '0.9em', fontWeight: 'bold' }}>Season (Year):</label>
+            <select
+              value={selectedSeason}
+              onChange={(e) => setSelectedSeason(e.target.value)}
+              className="form-select"
+              style={{ padding: '8px', borderRadius: '4px', border: '1px solid #ccc', minWidth: '120px' }}
+            >
+              <option value="">Select Season</option>
+              {globalSeasons.length > 0 ? (
+                globalSeasons.map((season, i) => (
+                  <option key={i} value={season}>{season}</option>
+                ))
+              ) : (
+                [...Array(10)].map((_, i) => {
+                  const year = new Date().getFullYear() - i + 1; // +1 to make e.g. 2026-2027 the top
+                  const seasonStr = `${year}-${year + 1}`;
+                  return <option key={seasonStr} value={seasonStr}>{seasonStr}</option>;
+                })
+              )}
+            </select>
+          </div>
+        </div>
+
         <div className="photo-processing-info">
           <div className="info-item">
             <span className="info-label">Project Folder:</span>
@@ -333,9 +421,9 @@ function AutoTagger({ projectId, projectData }) {
                   {/* Render Thumbnail */}
                   {photo.file_path && (
                     <div className="photo-thumbnail-preview" style={{ width: '80px', height: '80px', flexShrink: 0, borderRadius: '8px', overflow: 'hidden', backgroundColor: '#f0f0f0' }}>
-                      <img 
+                      <img
                         src={convertFileSrc(photo.file_path)}
-                        alt={photo.file_name} 
+                        alt={photo.file_name}
                         style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                         onError={(e) => {
                           e.target.style.display = 'none'; // hide if broken
