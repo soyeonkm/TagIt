@@ -18,6 +18,7 @@ pub struct Player {
     pub image_url: Option<String>,
     pub school_name: Option<String>,
     pub sport_type: Option<String>,
+    pub season: Option<String>,
     /// Base64-encoded face/headshot image extracted from the roster PDF
     pub face_image_base64: Option<String>,
     /// Textual description of the player's appearance, for later action-photo matching
@@ -270,6 +271,7 @@ Your task:
    - Team classification: "university", "professional", "amateur", or "other"
    - School name (if university team, otherwise null)
    - Team name (if professional team, otherwise null)
+   - Season (string representing the season, e.g. "2023-2024" or "2024", null if not present)
 3. Only include actual players — NOT coaches, staff, or managers.
 
 Return ONLY valid JSON in exactly this format, no extra text:
@@ -278,6 +280,7 @@ Return ONLY valid JSON in exactly this format, no extra text:
   "team_classification": "university",
   "school_name": "Michigan Wolverines",
   "team_name": null,
+  "season": "2024-2025",
   "players": [
     {{
       "name": "John Smith",
@@ -374,6 +377,8 @@ Supplementary extracted text from PDF (use as reference):
         let team_classification = json["team_classification"].as_str().map(|s| s.to_string());
         let school_name = json["school_name"].as_str().map(|s| s.to_string());
         let team_name = json["team_name"].as_str().map(|s| s.to_string());
+        let season = json["season"].as_str().map(|s| s.to_string())
+            .or_else(|| json["season"].as_i64().map(|n| n.to_string()));
 
         let mut players = Vec::new();
 
@@ -405,6 +410,7 @@ Supplementary extracted text from PDF (use as reference):
                     image_url: None,
                     school_name: school_name.clone(),
                     sport_type: sport_type.clone(),
+                    season: season.clone(),
                     face_image_base64: None, // filled in by attach_face_images_to_players
                     face_descriptor,
                 });
@@ -530,7 +536,7 @@ Supplementary extracted text from PDF (use as reference):
     /// Process a folder of photos and tag them automatically
     pub async fn process_photo_folder(
         &self,
-        project_id: &str,
+        user_id: &str,
         folder_path: &str,
         access_token: &str,
     ) -> Result<Vec<PhotoMetadata>, AppError> {
@@ -545,7 +551,7 @@ Supplementary extracted text from PDF (use as reference):
             if let Some(extension) = path.extension() {
                 if let Some(ext_str) = extension.to_str() {
                     if image_extensions.contains(&ext_str.to_lowercase().as_str()) {
-                        if let Ok(metadata) = self.process_single_photo(project_id, &path, access_token).await {
+                        if let Ok(metadata) = self.process_single_photo(user_id, &path, access_token).await {
                             photo_metadata.push(metadata);
                         }
                     }
@@ -559,7 +565,7 @@ Supplementary extracted text from PDF (use as reference):
     /// Process a single photo and extract metadata
     async fn process_single_photo(
         &self,
-        project_id: &str,
+        user_id: &str,
         file_path: &Path,
         access_token: &str,
     ) -> Result<PhotoMetadata, AppError> {
@@ -586,7 +592,7 @@ Supplementary extracted text from PDF (use as reference):
         let detected_jersey_numbers = self.detect_jersey_numbers(&image_bytes, mime_type).await?;
 
         let detected_players = self.match_players_with_detections(
-            project_id,
+            user_id,
             &detected_faces,
             &detected_jersey_numbers,
             access_token,
@@ -610,12 +616,12 @@ Supplementary extracted text from PDF (use as reference):
     /// Match detected faces and jersey numbers with players in the database
     async fn match_players_with_detections(
         &self,
-        project_id: &str,
+        user_id: &str,
         faces: &[DetectedFace],
         jersey_numbers: &[DetectedJerseyNumber],
         access_token: &str,
     ) -> Result<Vec<Player>, AppError> {
-        let players = self.supabase.get_players(project_id, access_token).await?;
+        let players = self.supabase.get_all_players(user_id, access_token).await?;
         let mut matched_players = Vec::new();
 
         // Match by jersey number first (most reliable)
@@ -637,6 +643,7 @@ Supplementary extracted text from PDF (use as reference):
                 image_url: None,
                 school_name: None,
                 sport_type: None,
+                season: None,
                 face_image_base64: None,
                 face_descriptor: None,
             });

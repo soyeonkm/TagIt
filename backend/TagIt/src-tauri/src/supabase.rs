@@ -319,6 +319,57 @@ impl SupabaseService {
         }
     }
 
+    pub async fn get_filter_options(&self, user_id: &str, access_token: &str) -> Result<serde_json::Value> {
+        let mut sports = std::collections::HashSet::new();
+        let mut schools = std::collections::HashSet::new();
+        let mut seasons = std::collections::HashSet::new();
+        
+        let url = format!("{}/rest/v1/players?user_id=eq.{}&select=school_name,sport_type,season", self.supabase_url, user_id);
+        
+        let response = reqwest::Client::new()
+            .get(&url)
+            .header("apikey", &self.supabase_anon_key)
+            .header("Authorization", &format!("Bearer {}", access_token))
+            .send()
+            .await?;
+            
+        if response.status().is_success() {
+            let data: Vec<serde_json::Value> = response.json().await.unwrap_or_default();
+            for row in data {
+                if let Some(sport) = row.get("sport_type").and_then(|s| s.as_str()) {
+                    if !sport.is_empty() {
+                        sports.insert(sport.to_string());
+                    }
+                }
+                if let Some(school) = row.get("school_name").and_then(|s| s.as_str()) {
+                    if !school.is_empty() {
+                        schools.insert(school.to_string());
+                    }
+                }
+                if let Some(season_str) = row.get("season").and_then(|s| s.as_str()) {
+                    if !season_str.is_empty() {
+                        seasons.insert(season_str.to_string());
+                    }
+                } else if let Some(season_num) = row.get("season").and_then(|s| s.as_i64()) {
+                    seasons.insert(season_num.to_string());
+                }
+            }
+        }
+        
+        let mut sports_vec: Vec<String> = sports.into_iter().collect();
+        sports_vec.sort();
+        let mut schools_vec: Vec<String> = schools.into_iter().collect();
+        schools_vec.sort();
+        let mut seasons_vec: Vec<String> = seasons.into_iter().collect();
+        seasons_vec.sort_by(|a, b| b.cmp(a));
+        
+        Ok(serde_json::json!({
+            "sports": sports_vec,
+            "schools": schools_vec,
+            "seasons": seasons_vec
+        }))
+    }
+
     // Get project by ID
     pub async fn get_project_by_id(&self, project_id: &str, user_id: &str, access_token: &str) -> Result<Option<Project>> {
         let url = format!("{}/rest/v1/projects?id=eq.{}&user_id=eq.{}", self.supabase_url, project_id, user_id);
@@ -406,11 +457,11 @@ impl SupabaseService {
     }
 
     // Player management methods
-    pub async fn create_player(&self, player: Player, project_id: &str, access_token: &str) -> Result<()> {
+    pub async fn create_player(&self, player: Player, user_id: &str, access_token: &str) -> Result<()> {
         let url = format!("{}/rest/v1/players", self.supabase_url);
 
         let player_data = serde_json::json!({
-            "project_id": project_id,
+            "user_id": user_id,
             "name": player.name,
             "jersey_number": player.jersey_number,
             "position": player.position,
@@ -418,7 +469,8 @@ impl SupabaseService {
             "school_name": player.school_name,
             "sport_type": player.sport_type,
             "face_image_base64": player.face_image_base64,
-            "face_descriptor": player.face_descriptor
+            "face_descriptor": player.face_descriptor,
+            "season": player.season
         });
 
         let response = reqwest::Client::new()
@@ -439,10 +491,29 @@ impl SupabaseService {
         }
     }
 
-    pub async fn upsert_player_by_name(&self, player: Player, project_id: &str, access_token: &str) -> Result<()> {
+    pub async fn upsert_player_by_name(&self, player: Player, user_id: &str, access_token: &str) -> Result<()> {
         let name_encoded = urlencoding::encode(&player.name);
         
-        let get_url = format!("{}/rest/v1/players?project_id=eq.{}&name=eq.{}", self.supabase_url, project_id, name_encoded);
+        let mut get_url = format!("{}/rest/v1/players?user_id=eq.{}&name=eq.{}", self.supabase_url, user_id, name_encoded);
+        
+        if let Some(school) = &player.school_name {
+            get_url.push_str(&format!("&school_name=eq.{}", urlencoding::encode(school)));
+        } else {
+            get_url.push_str("&school_name=is.null");
+        }
+        
+        if let Some(sport) = &player.sport_type {
+            get_url.push_str(&format!("&sport_type=eq.{}", urlencoding::encode(sport)));
+        } else {
+            get_url.push_str("&sport_type=is.null");
+        }
+        
+        if let Some(season) = &player.season {
+            get_url.push_str(&format!("&season=eq.{}", urlencoding::encode(season)));
+        } else {
+            get_url.push_str("&season=is.null");
+        }
+
         let get_response = reqwest::Client::new()
             .get(&get_url)
             .header("apikey", &self.supabase_anon_key)
@@ -453,7 +524,7 @@ impl SupabaseService {
         let players: Vec<serde_json::Value> = get_response.json().await.unwrap_or_default();
         
         let player_data = serde_json::json!({
-            "project_id": project_id,
+            "user_id": user_id,
             "name": player.name,
             "jersey_number": player.jersey_number,
             "position": player.position,
@@ -461,36 +532,41 @@ impl SupabaseService {
             "school_name": player.school_name,
             "sport_type": player.sport_type,
             "face_image_base64": player.face_image_base64,
-            "face_descriptor": player.face_descriptor
+            "face_descriptor": player.face_descriptor,
+            "season": player.season
         });
 
-        if !players.is_empty() {
-            // Update
-            let patch_url = format!("{}/rest/v1/players?project_id=eq.{}&name=eq.{}", self.supabase_url, project_id, name_encoded);
-            let patch_response = reqwest::Client::new()
-                .patch(&patch_url)
-                .header("apikey", &self.supabase_anon_key)
-                .header("Authorization", &format!("Bearer {}", access_token))
-                .header("Content-Type", "application/json")
-                .header("Prefer", "return=minimal")
-                .json(&player_data)
-                .send()
-                .await?;
-                
-            if patch_response.status().is_success() {
-                Ok(())
+        if let Some(existing_player) = players.first() {
+            if let Some(player_id) = existing_player.get("id").and_then(|id| id.as_str()) {
+                // Update using id
+                let patch_url = format!("{}/rest/v1/players?id=eq.{}", self.supabase_url, player_id);
+                let patch_response = reqwest::Client::new()
+                    .patch(&patch_url)
+                    .header("apikey", &self.supabase_anon_key)
+                    .header("Authorization", &format!("Bearer {}", access_token))
+                    .header("Content-Type", "application/json")
+                    .header("Prefer", "return=minimal")
+                    .json(&player_data)
+                    .send()
+                    .await?;
+                    
+                if patch_response.status().is_success() {
+                    Ok(())
+                } else {
+                    let error_text = patch_response.text().await?;
+                    Err(anyhow::anyhow!("Failed to update player: {}", error_text))
+                }
             } else {
-                let error_text = patch_response.text().await?;
-                Err(anyhow::anyhow!("Failed to update player: {}", error_text))
+                Err(anyhow::anyhow!("Failed to update player: existing player has no ID"))
             }
         } else {
             // Create
-            self.create_player(player, project_id, access_token).await
+            self.create_player(player, user_id, access_token).await
         }
     }
 
-    pub async fn get_players(&self, project_id: &str, access_token: &str) -> Result<Vec<Player>> {
-        let url = format!("{}/rest/v1/players?project_id=eq.{}", self.supabase_url, project_id);
+    pub async fn get_all_players(&self, user_id: &str, access_token: &str) -> Result<Vec<Player>> {
+        let url = format!("{}/rest/v1/players?user_id=eq.{}", self.supabase_url, user_id);
 
         let response = reqwest::Client::new()
             .get(&url)
