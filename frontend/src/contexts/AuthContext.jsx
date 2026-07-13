@@ -1,6 +1,9 @@
 import { createContext, useContext, useState, useEffect } from 'react'
 import { tauriSupabase } from '../tauriClient'
 
+// Tauri v2 compatibility: __TAURI__ was renamed to __TAURI_INTERNALS__
+const isRunningInTauri = () => typeof window !== 'undefined' && !!(window.__TAURI__ || window.__TAURI_INTERNALS__);
+
 const AuthContext = createContext({})
 
 export const useAuth = () => {
@@ -19,7 +22,7 @@ export const AuthProvider = ({ children }) => {
 
   // Check if we're in development mode
   // FIXED: This should be true when running in browser (DEV mode) and NOT in Tauri
-  const isDevelopment = import.meta.env.DEV && !(typeof window !== 'undefined' && window.__TAURI__);
+  const isDevelopment = import.meta.env.DEV && !isRunningInTauri();
 
   // Mock data for development
   const initializeMockData = () => {
@@ -78,7 +81,7 @@ export const AuthProvider = ({ children }) => {
           }
           initializeMockData();
           setLoading(false);
-        } else if (typeof window !== 'undefined' && window.__TAURI__) {
+        } else if (isRunningInTauri()) {
           // Tauri environment - check for existing user session
           setLoading(false)
         } else {

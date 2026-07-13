@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 
 // Check if we're running in Tauri environment
-const isTauri = typeof window !== 'undefined' && window.__TAURI__;
+const isTauri = typeof window !== 'undefined' && (window.__TAURI__ || window.__TAURI_INTERNALS__);
 
 // Tauri client that mimics Supabase API structure
 export const tauriAuth = {

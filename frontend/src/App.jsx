@@ -13,7 +13,7 @@ import { AuthProvider } from './contexts/AuthContext'
 
 function App() {
   // Check if we're running in Tauri environment
-  const isTauri = typeof window !== 'undefined' && window.__TAURI__;
+  const isTauri = typeof window !== 'undefined' && (window.__TAURI__ || window.__TAURI_INTERNALS__);
   
   // Check if we're in development mode (for local development without backend)
   const isDevelopment = import.meta.env.DEV && !isTauri;
