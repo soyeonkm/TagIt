@@ -1,7 +1,7 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use crate::config::Config;
-use crate::autotagger::{Player, PhotoMetadata};
+use crate::autotagger::{Player, Roster, ParsedRoster};
 
 // Data structures for Supabase operations
 #[derive(Debug, Serialize, Deserialize)]
@@ -86,14 +86,10 @@ impl SupabaseService {
 
         if response.status().is_success() {
             let data: serde_json::Value = response.json().await?;
-            println!("Debug - Supabase sign_up response: {:?}", data); // Debug log
-            
             if let Some(user) = data.get("user") {
                 let access_token = data.get("access_token")
                     .and_then(|t| t.as_str())
                     .map(|s| s.to_string());
-                
-                println!("Debug - Extracted access_token: {:?}", access_token); // Debug log
                 
                 Ok(AuthUser {
                     id: user["id"].as_str().unwrap_or("").to_string(),
@@ -132,14 +128,10 @@ impl SupabaseService {
 
         if response.status().is_success() {
             let data: serde_json::Value = response.json().await?;
-            println!("Debug - Supabase sign_in response: {:?}", data); // Debug log
-            
             if let Some(user) = data.get("user") {
                 let access_token = data.get("access_token")
                     .and_then(|t| t.as_str())
                     .map(|s| s.to_string());
-                
-                println!("Debug - Extracted access_token: {:?}", access_token); // Debug log
                 
                 Ok(AuthUser {
                     id: user["id"].as_str().unwrap_or("").to_string(),
@@ -277,28 +269,6 @@ impl SupabaseService {
         }
     }
 
-    /// Update specific fields of a project using partial data
-    pub async fn update_project_partial(&self, project_id: &str, partial_data: serde_json::Value, access_token: &str) -> Result<()> {
-        let url = format!("{}/rest/v1/projects?id=eq.{}", self.supabase_url, project_id);
-
-        let response = reqwest::Client::new()
-            .patch(&url)
-            .header("apikey", &self.supabase_anon_key)
-            .header("Authorization", &format!("Bearer {}", access_token))
-            .header("Content-Type", "application/json")
-            .header("Prefer", "return=minimal")
-            .json(&partial_data)
-            .send()
-            .await?;
-
-        if response.status().is_success() {
-            Ok(())
-        } else {
-            let error_text = response.text().await?;
-            Err(anyhow::anyhow!("Failed to update project partially: {}", error_text))
-        }
-    }
-
     pub async fn delete_project(&self, project_id: &str, access_token: &str) -> Result<()> {
         let url = format!("{}/rest/v1/projects?id=eq.{}", self.supabase_url, project_id);
 
@@ -317,57 +287,6 @@ impl SupabaseService {
             let error_text = response.text().await?;
             Err(anyhow::anyhow!("Failed to delete project: {}", error_text))
         }
-    }
-
-    pub async fn get_filter_options(&self, user_id: &str, access_token: &str) -> Result<serde_json::Value> {
-        let mut sports = std::collections::HashSet::new();
-        let mut schools = std::collections::HashSet::new();
-        let mut seasons = std::collections::HashSet::new();
-        
-        let url = format!("{}/rest/v1/players?user_id=eq.{}&select=school_name,sport_type,season", self.supabase_url, user_id);
-        
-        let response = reqwest::Client::new()
-            .get(&url)
-            .header("apikey", &self.supabase_anon_key)
-            .header("Authorization", &format!("Bearer {}", access_token))
-            .send()
-            .await?;
-            
-        if response.status().is_success() {
-            let data: Vec<serde_json::Value> = response.json().await.unwrap_or_default();
-            for row in data {
-                if let Some(sport) = row.get("sport_type").and_then(|s| s.as_str()) {
-                    if !sport.is_empty() {
-                        sports.insert(sport.to_string());
-                    }
-                }
-                if let Some(school) = row.get("school_name").and_then(|s| s.as_str()) {
-                    if !school.is_empty() {
-                        schools.insert(school.to_string());
-                    }
-                }
-                if let Some(season_str) = row.get("season").and_then(|s| s.as_str()) {
-                    if !season_str.is_empty() {
-                        seasons.insert(season_str.to_string());
-                    }
-                } else if let Some(season_num) = row.get("season").and_then(|s| s.as_i64()) {
-                    seasons.insert(season_num.to_string());
-                }
-            }
-        }
-        
-        let mut sports_vec: Vec<String> = sports.into_iter().collect();
-        sports_vec.sort();
-        let mut schools_vec: Vec<String> = schools.into_iter().collect();
-        schools_vec.sort();
-        let mut seasons_vec: Vec<String> = seasons.into_iter().collect();
-        seasons_vec.sort_by(|a, b| b.cmp(a));
-        
-        Ok(serde_json::json!({
-            "sports": sports_vec,
-            "schools": schools_vec,
-            "seasons": seasons_vec
-        }))
     }
 
     // Get project by ID
@@ -456,229 +375,134 @@ impl SupabaseService {
         }
     }
 
-    // Player management methods
-    pub async fn create_player(&self, player: Player, user_id: &str, access_token: &str) -> Result<()> {
-        let url = format!("{}/rest/v1/players", self.supabase_url);
+    // Roster management methods
+    const ROSTER_COLUMNS: &'static str = "id,name,file_name,sport,season,created_at";
 
-        let player_data = serde_json::json!({
-            "user_id": user_id,
-            "name": player.name,
-            "jersey_number": player.jersey_number,
-            "position": player.position,
-            "team": player.team,
-            "school_name": player.school_name,
-            "sport_type": player.sport_type,
-            "face_image_base64": player.face_image_base64,
-            "face_descriptor": player.face_descriptor,
-            "season": player.season
-        });
-
-        let response = reqwest::Client::new()
-            .post(&url)
-            .header("apikey", &self.supabase_anon_key)
-            .header("Authorization", &format!("Bearer {}", access_token))
-            .header("Content-Type", "application/json")
-            .header("Prefer", "return=minimal")
-            .json(&player_data)
-            .send()
-            .await?;
-
-        if response.status().is_success() {
-            Ok(())
-        } else {
-            let error_text = response.text().await?;
-            Err(anyhow::anyhow!("Failed to create player: {}", error_text))
-        }
-    }
-
-    pub async fn upsert_player_by_name(&self, player: Player, user_id: &str, access_token: &str) -> Result<()> {
-        let name_encoded = urlencoding::encode(&player.name);
-        
-        let mut get_url = format!("{}/rest/v1/players?user_id=eq.{}&name=eq.{}", self.supabase_url, user_id, name_encoded);
-        
-        if let Some(school) = &player.school_name {
-            get_url.push_str(&format!("&school_name=eq.{}", urlencoding::encode(school)));
-        } else {
-            get_url.push_str("&school_name=is.null");
-        }
-        
-        if let Some(sport) = &player.sport_type {
-            get_url.push_str(&format!("&sport_type=eq.{}", urlencoding::encode(sport)));
-        } else {
-            get_url.push_str("&sport_type=is.null");
-        }
-        
-        if let Some(season) = &player.season {
-            get_url.push_str(&format!("&season=eq.{}", urlencoding::encode(season)));
-        } else {
-            get_url.push_str("&season=is.null");
-        }
-
-        let get_response = reqwest::Client::new()
-            .get(&get_url)
-            .header("apikey", &self.supabase_anon_key)
-            .header("Authorization", &format!("Bearer {}", access_token))
-            .send()
-            .await?;
-
-        let players: Vec<serde_json::Value> = get_response.json().await.unwrap_or_default();
-        
-        let player_data = serde_json::json!({
-            "user_id": user_id,
-            "name": player.name,
-            "jersey_number": player.jersey_number,
-            "position": player.position,
-            "team": player.team,
-            "school_name": player.school_name,
-            "sport_type": player.sport_type,
-            "face_image_base64": player.face_image_base64,
-            "face_descriptor": player.face_descriptor,
-            "season": player.season
-        });
-
-        if let Some(existing_player) = players.first() {
-            if let Some(player_id) = existing_player.get("id").and_then(|id| id.as_str()) {
-                // Update using id
-                let patch_url = format!("{}/rest/v1/players?id=eq.{}", self.supabase_url, player_id);
-                let patch_response = reqwest::Client::new()
-                    .patch(&patch_url)
-                    .header("apikey", &self.supabase_anon_key)
-                    .header("Authorization", &format!("Bearer {}", access_token))
-                    .header("Content-Type", "application/json")
-                    .header("Prefer", "return=minimal")
-                    .json(&player_data)
-                    .send()
-                    .await?;
-                    
-                if patch_response.status().is_success() {
-                    Ok(())
-                } else {
-                    let error_text = patch_response.text().await?;
-                    Err(anyhow::anyhow!("Failed to update player: {}", error_text))
-                }
-            } else {
-                Err(anyhow::anyhow!("Failed to update player: existing player has no ID"))
-            }
-        } else {
-            // Create
-            self.create_player(player, user_id, access_token).await
-        }
-    }
-
-    pub async fn get_all_players(&self, user_id: &str, access_token: &str) -> Result<Vec<Player>> {
-        let url = format!("{}/rest/v1/players?user_id=eq.{}", self.supabase_url, user_id);
+    /// Find a roster this user already uploaded from the exact same PDF.
+    pub async fn find_roster_by_hash(&self, user_id: &str, pdf_hash: &str, access_token: &str) -> Result<Option<Roster>> {
+        let url = format!(
+            "{}/rest/v1/rosters?user_id=eq.{}&pdf_hash=eq.{}&select={}",
+            self.supabase_url, user_id, pdf_hash, Self::ROSTER_COLUMNS
+        );
 
         let response = reqwest::Client::new()
             .get(&url)
             .header("apikey", &self.supabase_anon_key)
             .header("Authorization", &format!("Bearer {}", access_token))
-            .header("Content-Type", "application/json")
             .send()
             .await?;
 
         if response.status().is_success() {
-            let players: Vec<Player> = response.json().await?;
-            Ok(players)
+            let rosters: Vec<Roster> = response.json().await?;
+            Ok(rosters.into_iter().next())
         } else {
             let error_text = response.text().await?;
-            Err(anyhow::anyhow!("Failed to get players: {}", error_text))
+            Err(anyhow::anyhow!("Failed to look up roster: {}", error_text))
         }
     }
 
-    #[allow(dead_code)]
-    pub async fn delete_player(&self, player_id: &str, access_token: &str) -> Result<()> {
-        let url = format!("{}/rest/v1/players?id=eq.{}", self.supabase_url, player_id);
-
+    /// Insert a roster and its players. Returns None if the same PDF was already saved
+    /// (unique (user_id, pdf_hash) violation, e.g. two uploads racing).
+    pub async fn create_roster(&self, user_id: &str, name: &str, file_name: &str, pdf_hash: &str, parsed: &ParsedRoster, access_token: &str) -> Result<Option<Roster>> {
         let response = reqwest::Client::new()
-            .delete(&url)
+            .post(format!("{}/rest/v1/rosters?select={}", self.supabase_url, Self::ROSTER_COLUMNS))
             .header("apikey", &self.supabase_anon_key)
             .header("Authorization", &format!("Bearer {}", access_token))
-            .header("Content-Type", "application/json")
+            .header("Prefer", "return=representation")
+            .json(&serde_json::json!({
+                "user_id": user_id,
+                "name": name,
+                "file_name": file_name,
+                "pdf_hash": pdf_hash,
+                "sport": parsed.sport,
+                "season": parsed.season
+            }))
+            .send()
+            .await?;
+
+        if response.status() == reqwest::StatusCode::CONFLICT {
+            return Ok(None);
+        }
+        if !response.status().is_success() {
+            let error_text = response.text().await?;
+            return Err(anyhow::anyhow!("Failed to create roster: {}", error_text));
+        }
+        let roster = response.json::<Vec<Roster>>().await?.into_iter().next()
+            .ok_or_else(|| anyhow::anyhow!("Failed to create roster: no row returned"))?;
+
+        let players: Vec<serde_json::Value> = parsed.players.iter().map(|p| serde_json::json!({
+            "roster_id": roster.id,
+            "name": p.name,
+            "jersey_number": p.jersey_number
+        })).collect();
+
+        let response = reqwest::Client::new()
+            .post(format!("{}/rest/v1/players", self.supabase_url))
+            .header("apikey", &self.supabase_anon_key)
+            .header("Authorization", &format!("Bearer {}", access_token))
             .header("Prefer", "return=minimal")
+            .json(&players)
             .send()
             .await?;
 
         if response.status().is_success() {
-            Ok(())
+            Ok(Some(roster))
         } else {
             let error_text = response.text().await?;
-            Err(anyhow::anyhow!("Failed to delete player: {}", error_text))
+            // Don't leave an empty roster behind, or re-uploading the PDF would be reported as a duplicate.
+            let _ = self.delete_roster(&roster.id, access_token).await;
+            Err(anyhow::anyhow!("Failed to save roster players: {}", error_text))
         }
     }
 
-    // Photo metadata management methods
-    pub async fn save_photo_metadata(&self, photo: PhotoMetadata, project_id: &str, access_token: &str) -> Result<()> {
-        let url = format!("{}/rest/v1/photos?on_conflict=project_id,file_path", self.supabase_url);
-
-        let photo_data = serde_json::json!({
-            "project_id": project_id,
-            "file_path": photo.file_path,
-            "file_name": photo.file_name,
-            "file_size": photo.file_size,
-            "width": photo.width,
-            "height": photo.height,
-            "detected_players": photo.detected_players,
-            "detected_faces": photo.detected_faces,
-            "detected_jersey_numbers": photo.detected_jersey_numbers,
-            "description": photo.description
-        });
-
-        let response = reqwest::Client::new()
-            .post(&url)
-            .header("apikey", &self.supabase_anon_key)
-            .header("Authorization", &format!("Bearer {}", access_token))
-            .header("Content-Type", "application/json")
-            .header("Prefer", "resolution=merge-duplicates, return=minimal")
-            .json(&photo_data)
-            .send()
-            .await?;
-
-        if response.status().is_success() {
-            Ok(())
-        } else {
-            let error_text = response.text().await?;
-            Err(anyhow::anyhow!("Failed to save photo metadata: {}", error_text))
-        }
-    }
-
-    pub async fn get_photo_metadata(&self, project_id: &str, access_token: &str) -> Result<Vec<PhotoMetadata>> {
-        let url = format!("{}/rest/v1/photos?project_id=eq.{}", self.supabase_url, project_id);
+    pub async fn list_rosters(&self, user_id: &str, access_token: &str) -> Result<Vec<Roster>> {
+        let url = format!(
+            "{}/rest/v1/rosters?user_id=eq.{}&select={}&order=season.desc,created_at.desc",
+            self.supabase_url, user_id, Self::ROSTER_COLUMNS
+        );
 
         let response = reqwest::Client::new()
             .get(&url)
             .header("apikey", &self.supabase_anon_key)
             .header("Authorization", &format!("Bearer {}", access_token))
-            .header("Content-Type", "application/json")
             .send()
             .await?;
 
         if response.status().is_success() {
-            let photos: Vec<PhotoMetadata> = response.json().await?;
-            Ok(photos)
+            Ok(response.json().await?)
         } else {
             let error_text = response.text().await?;
-            Err(anyhow::anyhow!("Failed to get photo metadata: {}", error_text))
+            Err(anyhow::anyhow!("Failed to list rosters: {}", error_text))
         }
     }
 
-    #[allow(dead_code)]
-    pub async fn update_photo_metadata(&self, photo_id: &str, photo: PhotoMetadata, access_token: &str) -> Result<()> {
-        let url = format!("{}/rest/v1/photos?id=eq.{}", self.supabase_url, photo_id);
-
-        let photo_data = serde_json::json!({
-            "detected_players": photo.detected_players,
-            "detected_faces": photo.detected_faces,
-            "detected_jersey_numbers": photo.detected_jersey_numbers,
-            "description": photo.description
-        });
+    pub async fn get_roster_players(&self, roster_id: &str, access_token: &str) -> Result<Vec<Player>> {
+        let url = format!(
+            "{}/rest/v1/players?roster_id=eq.{}&select=name,jersey_number&order=name",
+            self.supabase_url, roster_id
+        );
 
         let response = reqwest::Client::new()
-            .patch(&url)
+            .get(&url)
             .header("apikey", &self.supabase_anon_key)
             .header("Authorization", &format!("Bearer {}", access_token))
-            .header("Content-Type", "application/json")
-            .header("Prefer", "return=minimal")
-            .json(&photo_data)
+            .send()
+            .await?;
+
+        if response.status().is_success() {
+            Ok(response.json().await?)
+        } else {
+            let error_text = response.text().await?;
+            Err(anyhow::anyhow!("Failed to get roster players: {}", error_text))
+        }
+    }
+
+    /// Players are removed with it via ON DELETE CASCADE.
+    pub async fn delete_roster(&self, roster_id: &str, access_token: &str) -> Result<()> {
+        let response = reqwest::Client::new()
+            .delete(format!("{}/rest/v1/rosters?id=eq.{}", self.supabase_url, roster_id))
+            .header("apikey", &self.supabase_anon_key)
+            .header("Authorization", &format!("Bearer {}", access_token))
             .send()
             .await?;
 
@@ -686,7 +510,7 @@ impl SupabaseService {
             Ok(())
         } else {
             let error_text = response.text().await?;
-            Err(anyhow::anyhow!("Failed to update photo metadata: {}", error_text))
+            Err(anyhow::anyhow!("Failed to delete roster: {}", error_text))
         }
     }
 }

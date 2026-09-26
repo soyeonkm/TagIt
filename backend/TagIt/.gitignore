@@ -33,9 +33,6 @@ dist-ssr
 .env.development
 .env.production
 
-# Configuration files with sensitive data
-src-tauri/src/config.rs
-src-tauri/src/config.rs.bak
 
 # Database files
 *.db

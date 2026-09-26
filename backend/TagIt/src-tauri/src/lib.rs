@@ -2,7 +2,8 @@ mod config;
 mod supabase;
 mod autotagger;
 mod error;
-mod insightface;
+mod raw;
+mod xmp;
 
 use anyhow::Result;
 use std::fs;
@@ -11,7 +12,7 @@ use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use rfd::FileDialog;
 
 use supabase::{SupabaseService, AuthUser, Profile, Project, CreateProjectRequest};
-use autotagger::{AutoTagger, Player, PhotoMetadata, ParsingResult};
+use autotagger::{AutoTagger, ParsingResult, Roster, TagResult};
 
 
 // Tauri commands for authentication
@@ -219,11 +220,8 @@ async fn read_project_folder(_project_id: String, folder_path: String, _access_t
             // Check if it's an image file - expanded list of extensions
             if let Some(extension) = file_path.extension() {
                 let ext = extension.to_string_lossy().to_lowercase();
-                if matches!(ext.as_str(), 
-                    "jpg" | "jpeg" | "png" | "gif" | "bmp" | "webp" | "tiff" | "tif" |
-                    "heic" | "heif" | "raw" | "cr2" | "nef" | "arw" | "dng" | "orf" |
-                    "JPG" | "JPEG" | "PNG" | "GIF" | "BMP" | "WEBP" | "TIFF" | "TIF" |
-                    "HEIC" | "HEIF" | "RAW" | "CR2" | "NEF" | "ARW" | "DNG" | "ORF"
+                if raw::is_raw(&file_path) || matches!(ext.as_str(),
+                    "jpg" | "jpeg" | "png" | "gif" | "bmp" | "webp" | "tiff" | "tif" | "heic" | "heif"
                 ) {
                     image_files += 1;
                     
@@ -382,48 +380,7 @@ async fn get_image_thumbnail(file_path: String, width: u32, height: u32, quality
             
             image::DynamicImage::ImageRgb8(fallback)
         },
-        "cr3" | "nef" | "arw" | "dng" | "raf" | "orf" | "rw2" => {
-            // Handle RAW formats
-            let raw_data = rawloader::decode_file(&file_path)
-                .map_err(|e| format!("Failed to decode RAW file: {}", e))?;
-            
-            // Convert to RGB
-            let mut rgb_image = image::RgbImage::new(
-                raw_data.width.try_into().unwrap_or(200), 
-                raw_data.height.try_into().unwrap_or(150)
-            );
-            
-            // Handle different RAW data formats
-            match raw_data.data {
-                rawloader::RawImageData::Integer(data) => {
-                    for (i, pixel) in data.chunks(3).enumerate() {
-                        if pixel.len() == 3 {
-                            let x = i % rgb_image.width() as usize;
-                            let y = i / rgb_image.width() as usize;
-                            if x < rgb_image.width() as usize && y < rgb_image.height() as usize {
-                                rgb_image.put_pixel(x as u32, y as u32, image::Rgb([pixel[0] as u8, pixel[1] as u8, pixel[2] as u8]));
-                            }
-                        }
-                    }
-                },
-                rawloader::RawImageData::Float(data) => {
-                    for (i, pixel) in data.chunks(3).enumerate() {
-                        if pixel.len() == 3 {
-                            let x = i % rgb_image.width() as usize;
-                            let y = i / rgb_image.width() as usize;
-                            if x < rgb_image.width() as usize && y < rgb_image.height() as usize {
-                                let r = (pixel[0] * 255.0).clamp(0.0, 255.0) as u8;
-                                let g = (pixel[1] * 255.0).clamp(0.0, 255.0) as u8;
-                                let b = (pixel[2] * 255.0).clamp(0.0, 255.0) as u8;
-                                rgb_image.put_pixel(x as u32, y as u32, image::Rgb([r, g, b]));
-                            }
-                        }
-                    }
-                }
-            }
-            
-            image::DynamicImage::ImageRgb8(rgb_image)
-        },
+        _ if raw::is_raw(path) => raw::preview_image(path)?,
         _ => {
             // Handle standard formats (JPEG, PNG, etc.)
             ImageReader::new(reader)
@@ -435,7 +392,7 @@ async fn get_image_thumbnail(file_path: String, width: u32, height: u32, quality
     };
     
     // Resize the image to thumbnail dimensions
-    let thumbnail = img.resize(width, height, image::imageops::FilterType::Lanczos3);
+    let thumbnail = img.thumbnail(width, height);
     
     // Convert to RGB8 if needed
     let rgb_thumbnail = thumbnail.to_rgb8();
@@ -459,310 +416,155 @@ async fn get_image_thumbnail(file_path: String, width: u32, height: u32, quality
 // Tauri command for reading photo XMP metadata
 #[tauri::command]
 async fn read_photo_metadata(file_path: String) -> Result<serde_json::Value, String> {
-    use std::path::Path;
-    
-    println!("Reading metadata for file: {}", file_path); // Commented out to hide status message
-    
-    let path = Path::new(&file_path);
+    let path = PathBuf::from(&file_path);
     if !path.exists() {
         return Err(format!("File not found: {}", file_path));
     }
-    
-    // Create XMP sidecar file path
-    let xmp_path = path.with_extension("xmp");
-    
-    // Check if XMP file exists
-    if !xmp_path.exists() {
-        // Return empty metadata if no XMP file exists
-        let mut response = serde_json::Map::new();
-        response.insert("success".to_string(), serde_json::Value::Bool(true));
-        response.insert("hasMetadata".to_string(), serde_json::Value::Bool(false));
-        response.insert("metadata".to_string(), serde_json::json!({
-            "title": "",
-            "description": "",
-            "keywords": "",
-            "creator": "",
-            "copyright": "",
-            "rating": 0,
-            "colorLabel": "None"
-        }));
-        return Ok(serde_json::Value::Object(response));
-    }
-    
-    // Read XMP file content
-    let xmp_content = fs::read_to_string(&xmp_path)
-        .map_err(|e| format!("Failed to read XMP file: {}", e))?;
-    
-    // Parse XMP content (simple XML parsing for basic fields)
-    let mut metadata = serde_json::Map::new();
-    metadata.insert("title".to_string(), serde_json::Value::String("".to_string()));
-    metadata.insert("description".to_string(), serde_json::Value::String("".to_string()));
-    metadata.insert("keywords".to_string(), serde_json::Value::String("".to_string()));
-    metadata.insert("creator".to_string(), serde_json::Value::String("".to_string()));
-    metadata.insert("copyright".to_string(), serde_json::Value::String("".to_string()));
-    metadata.insert("rating".to_string(), serde_json::Value::Number(serde_json::Number::from(0)));
-    metadata.insert("colorLabel".to_string(), serde_json::Value::String("None".to_string()));
-    
-    // Simple parsing of XMP content
-    let lines: Vec<&str> = xmp_content.lines().collect();
-    
-    // Parse basic metadata fields
-    for line in &lines {
-        let line = line.trim();
-        
-        if line.contains("<dc:title>") && line.contains("</dc:title>") {
-            if let Some(start) = line.find("<dc:title>") {
-                if let Some(end) = line.find("</dc:title>") {
-                    let title = &line[start + 10..end];
-                    metadata.insert("title".to_string(), serde_json::Value::String(title.to_string()));
-                }
-            }
-        } else if line.contains("<dc:description>") && line.contains("</dc:description>") {
-            if let Some(start) = line.find("<dc:description>") {
-                if let Some(end) = line.find("</dc:description>") {
-                    let description = &line[start + 16..end];
-                    metadata.insert("description".to_string(), serde_json::Value::String(description.to_string()));
-                }
-            }
-        } else if line.contains("<dc:creator>") && line.contains("</dc:creator>") {
-            if let Some(start) = line.find("<dc:creator>") {
-                if let Some(end) = line.find("</dc:creator>") {
-                    let creator = &line[start + 12..end];
-                    metadata.insert("creator".to_string(), serde_json::Value::String(creator.to_string()));
-                }
-            }
-        } else if line.contains("<dc:rights>") && line.contains("</dc:rights>") {
-            if let Some(start) = line.find("<dc:rights>") {
-                if let Some(end) = line.find("</dc:rights>") {
-                    let copyright = &line[start + 11..end];
-                    metadata.insert("copyright".to_string(), serde_json::Value::String(copyright.to_string()));
-                }
-            }
-        } else if line.contains("<xmp:Rating>") && line.contains("</xmp:Rating>") {
-            if let Some(start) = line.find("<xmp:Rating>") {
-                if let Some(end) = line.find("</xmp:Rating>") {
-                    let rating_str = &line[start + 12..end];
-                    if let Ok(rating) = rating_str.parse::<u64>() {
-                        metadata.insert("rating".to_string(), serde_json::Value::Number(serde_json::Number::from(rating)));
-                    }
-                }
-            }
-        } else if line.contains("<xmp:Label>") && line.contains("</xmp:Label>") {
-            if let Some(start) = line.find("<xmp:Label>") {
-                if let Some(end) = line.find("</xmp:Label>") {
-                    let label = &line[start + 11..end];
-                    metadata.insert("colorLabel".to_string(), serde_json::Value::String(label.to_string()));
-                }
-            }
+
+    let xmp_path = xmp::sidecar_path(&path);
+    let has_metadata = raw::is_raw(&path) && xmp_path.exists();
+    let xml = if has_metadata {
+        fs::read_to_string(&xmp_path).map_err(|e| format!("Failed to read XMP file: {}", e))?
+    } else {
+        String::new()
+    };
+    let first = |name: &str| xmp::get(&xml, name).into_iter().next().unwrap_or_default();
+
+    Ok(serde_json::json!({
+        "success": true,
+        "hasMetadata": has_metadata,
+        "metadata": {
+            "title": first("dc:title"),
+            "description": first("dc:description"),
+            "keywords": xmp::get(&xml, "dc:subject").join(", "),
+            "creator": xmp::get(&xml, "dc:creator").join(", "),
+            "copyright": first("dc:rights"),
+            "rating": first("xmp:Rating").parse::<u64>().unwrap_or(0),
+            "colorLabel": Some(first("xmp:Label")).filter(|l| !l.is_empty()).unwrap_or_else(|| "None".to_string())
         }
-    }
-    
-    // Handle keywords (more complex due to RDF bag structure)
-    let mut keywords = Vec::new();
-    let mut in_subject = false;
-    let mut in_bag = false;
-    
-    for line in &lines {
-        let line = line.trim();
-        
-        if line.contains("<dc:subject>") {
-            in_subject = true;
-        } else if line.contains("</dc:subject>") {
-            in_subject = false;
-        } else if in_subject && line.contains("<rdf:Bag>") {
-            in_bag = true;
-        } else if in_subject && line.contains("</rdf:Bag>") {
-            in_bag = false;
-        } else if in_subject && in_bag && line.contains("<rdf:li>") && line.contains("</rdf:li>") {
-            if let Some(start) = line.find("<rdf:li>") {
-                if let Some(end) = line.find("</rdf:li>") {
-                    let keyword = &line[start + 8..end];
-                    keywords.push(keyword.to_string());
-                }
-            }
-        }
-    }
-    
-    if !keywords.is_empty() {
-        metadata.insert("keywords".to_string(), serde_json::Value::String(keywords.join(", ")));
-    }
-    
-    // Return success response with metadata
-    let mut response = serde_json::Map::new();
-    response.insert("success".to_string(), serde_json::Value::Bool(true));
-    response.insert("hasMetadata".to_string(), serde_json::Value::Bool(true));
-    response.insert("metadata".to_string(), serde_json::Value::Object(metadata));
-    
-    Ok(serde_json::Value::Object(response))
+    }))
 }
 
-// Tauri command for updating photo XMP metadata
+// Tauri command for updating photo XMP metadata. Only RAW files get sidecars; existing
+// sidecar content (e.g. Lightroom develop settings) is preserved.
 #[tauri::command]
 async fn update_photo_metadata(file_path: String, metadata: serde_json::Value) -> Result<serde_json::Value, String> {
-    use std::path::Path;
-
-    
-    println!("Updating metadata for file: {}", file_path);
-    println!("New metadata: {:?}", metadata);
-    
-    let path = Path::new(&file_path);
+    let path = PathBuf::from(&file_path);
     if !path.exists() {
         return Err(format!("File not found: {}", file_path));
     }
-    
-    // Extract metadata values from JSON
-    let title = metadata.get("title").and_then(|v| v.as_str()).unwrap_or("");
-    let description = metadata.get("description").and_then(|v| v.as_str()).unwrap_or("");
-    let keywords = metadata.get("keywords").and_then(|v| v.as_str()).unwrap_or("");
-    let creator = metadata.get("creator").and_then(|v| v.as_str()).unwrap_or("");
-    let copyright = metadata.get("copyright").and_then(|v| v.as_str()).unwrap_or("");
+    if !raw::is_raw(&path) {
+        return Err("XMP sidecar files are only written for RAW photos".to_string());
+    }
+
+    let text = |key: &str| metadata.get(key).and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    let list = |key: &str| text(key).split(',').map(|s| s.trim().to_string()).collect::<Vec<_>>();
     let rating = metadata.get("rating").and_then(|v| v.as_u64()).unwrap_or(0);
-    let color_label = metadata.get("colorLabel").and_then(|v| v.as_str()).unwrap_or("");
-    
-    // Create XMP metadata content
-    let mut xmp_content = String::new();
-    xmp_content.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
-    xmp_content.push_str("<x:xmpmeta xmlns:x=\"adobe:ns:meta/\">\n");
-    xmp_content.push_str("  <rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">\n");
-    xmp_content.push_str("    <rdf:Description rdf:about=\"\"\n");
-    xmp_content.push_str("      xmlns:dc=\"http://purl.org/dc/elements/1.1/\"\n");
-    xmp_content.push_str("      xmlns:xmp=\"http://ns.adobe.com/xap/1.0/\">\n");
-    
-    // Add metadata fields
-    if !title.is_empty() {
-        xmp_content.push_str(&format!("      <dc:title>{}</dc:title>\n", title));
+    let label = Some(text("colorLabel")).filter(|l| l != "None").unwrap_or_default();
+
+    let xmp_path = xmp::sidecar_path(&path);
+    let mut xml = xmp::read_or_new(&xmp_path)?;
+    for (name, kind, values) in [
+        ("dc:title", xmp::Kind::Alt, vec![text("title")]),
+        ("dc:description", xmp::Kind::Alt, vec![text("description")]),
+        ("dc:creator", xmp::Kind::Seq, list("creator")),
+        ("dc:subject", xmp::Kind::Bag, list("keywords")),
+        ("dc:rights", xmp::Kind::Alt, vec![text("copyright")]),
+        ("xmp:Rating", xmp::Kind::Simple, vec![if rating > 0 { rating.to_string() } else { String::new() }]),
+        ("xmp:Label", xmp::Kind::Simple, vec![label]),
+    ] {
+        xml = xmp::set(&xml, name, kind, &values)?;
     }
-    
-    if !description.is_empty() {
-        xmp_content.push_str(&format!("      <dc:description>{}</dc:description>\n", description));
-    }
-    
-    if !creator.is_empty() {
-        xmp_content.push_str(&format!("      <dc:creator>{}</dc:creator>\n", creator));
-    }
-    
-    if !keywords.is_empty() {
-        let keywords_list: Vec<&str> = keywords.split(',').map(|s| s.trim()).collect();
-        xmp_content.push_str("      <dc:subject>\n");
-        xmp_content.push_str("        <rdf:Bag>\n");
-        for keyword in keywords_list {
-            xmp_content.push_str(&format!("          <rdf:li>{}</rdf:li>\n", keyword));
-        }
-        xmp_content.push_str("        </rdf:Bag>\n");
-        xmp_content.push_str("      </dc:subject>\n");
-    }
-    
-    if !copyright.is_empty() {
-        xmp_content.push_str(&format!("      <dc:rights>{}</dc:rights>\n", copyright));
-    }
-    
-    if rating > 0 {
-        xmp_content.push_str(&format!("      <xmp:Rating>{}</xmp:Rating>\n", rating));
-    }
-    
-    if !color_label.is_empty() && color_label != "None" {
-        xmp_content.push_str(&format!("      <xmp:Label>{}</xmp:Label>\n", color_label));
-    }
-    
-    // Close XML tags
-    xmp_content.push_str("    </rdf:Description>\n");
-    xmp_content.push_str("  </rdf:RDF>\n");
-    xmp_content.push_str("</x:xmpmeta>\n");
-    
-    // Create XMP sidecar file path
-    let xmp_path = path.with_extension("xmp");
-    
-    // Write XMP metadata to sidecar file
-    fs::write(&xmp_path, xmp_content).map_err(|e| format!("Failed to write XMP file: {}", e))?;
-    
-    println!("XMP metadata written to: {:?}", xmp_path);
-    
-    // Return success response
-    let mut response = serde_json::Map::new();
-    response.insert("success".to_string(), serde_json::Value::Bool(true));
-    response.insert("message".to_string(), serde_json::Value::String("XMP metadata file created successfully".to_string()));
-    response.insert("xmpPath".to_string(), serde_json::Value::String(xmp_path.to_string_lossy().to_string()));
-    
-    Ok(serde_json::Value::Object(response))
+    xmp::write_atomic(&xmp_path, &xml)?;
+
+    Ok(serde_json::json!({
+        "success": true,
+        "message": "XMP metadata saved",
+        "xmpPath": xmp_path.to_string_lossy()
+    }))
 }
 
 // PDF Roster Parsing command
+/// Parse a roster PDF into its own roster. If this user already uploaded the exact
+/// same PDF, parsing is skipped entirely and `duplicate: true` is returned.
 #[tauri::command]
 async fn parse_roster_from_pdf(
     pdf_path: String,
-    project_id: String,
+    name: String,
     user_id: String,
     access_token: String,
 ) -> Result<ParsingResult, String> {
+    use sha2::{Digest, Sha256};
+
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("Roster name is required".to_string());
+    }
+    let pdf_bytes = fs::read(&pdf_path).map_err(|e| format!("Failed to read PDF: {}", e))?;
+    // ponytail: exact-file match only; a re-exported PDF of the same roster hashes differently
+    let pdf_hash = format!("{:x}", Sha256::digest(&pdf_bytes));
+    let file_name = PathBuf::from(&pdf_path).file_name().unwrap_or_default().to_string_lossy().to_string();
+
     let supabase = SupabaseService::new().map_err(|e| e.to_string())?;
+    let duplicate = |roster: Roster| ParsingResult {
+        duplicate: true,
+        message: format!(
+            "This roster already exists as \"{}\" ({} {}). Parsing was skipped.",
+            roster.name, roster.sport, roster.season
+        ),
+        roster: Some(roster),
+        players: Vec::new(),
+    };
 
-    let autotagger = AutoTagger::new(supabase.clone()).map_err(|e| e.to_string())?;
-    let parsing_result = autotagger.parse_roster_from_pdf(&pdf_path).await.map_err(|e| e.to_string())?;
-
-    if parsing_result.success && !parsing_result.players.is_empty() {
-        // Update project with sport/classification info from first player
-        if let Some(first_player) = parsing_result.players.first() {
-            let mut project_update = serde_json::json!({});
-            if let Some(sport) = &first_player.sport_type {
-                project_update["sport_type"] = serde_json::Value::String(sport.clone());
-            }
-            let classification = if first_player.school_name.is_some() {
-                "university"
-            } else {
-                "other"
-            };
-            project_update["team_classification"] = serde_json::Value::String(classification.to_string());
-            let _ = supabase.update_project_partial(&project_id, project_update, &access_token).await;
-        }
-
-        // Save all players (including face data) to database
-        for player in &parsing_result.players {
-            supabase.upsert_player_by_name(player.clone(), &user_id, &access_token).await
-                .map_err(|e| e.to_string())?;
-        }
+    if let Some(existing) = supabase.find_roster_by_hash(&user_id, &pdf_hash, &access_token).await.map_err(|e| e.to_string())? {
+        return Ok(duplicate(existing));
     }
 
-    Ok(parsing_result)
+    let autotagger = AutoTagger::new(supabase.clone()).map_err(|e| e.to_string())?;
+    let parsed = autotagger.parse_roster_pdf(&pdf_bytes).await.map_err(|e| e.to_string())?;
+
+    match supabase.create_roster(&user_id, name, &file_name, &pdf_hash, &parsed, &access_token).await.map_err(|e| e.to_string())? {
+        Some(roster) => Ok(ParsingResult {
+            duplicate: false,
+            message: format!("Saved \"{}\" with {} players ({} {}).", roster.name, parsed.players.len(), roster.sport, roster.season),
+            roster: Some(roster),
+            players: parsed.players,
+        }),
+        // Lost a race with an identical upload
+        None => match supabase.find_roster_by_hash(&user_id, &pdf_hash, &access_token).await.map_err(|e| e.to_string())? {
+            Some(existing) => Ok(duplicate(existing)),
+            None => Err("Roster already exists but could not be loaded".to_string()),
+        },
+    }
 }
 
+#[tauri::command]
+async fn list_rosters(user_id: String, access_token: String) -> Result<Vec<Roster>, String> {
+    let supabase = SupabaseService::new().map_err(|e| e.to_string())?;
+    supabase.list_rosters(&user_id, &access_token).await.map_err(|e| e.to_string())
+}
+
+/// Tag the RAW photos in `folder_path` using one roster. Emits `tag-progress`
+/// events ({ done, total, fileName }) so the UI can show progress.
 #[tauri::command]
 async fn process_photo_folder(
-    project_id: String,
-    user_id: String,
+    app: tauri::AppHandle,
+    roster_id: String,
+    jersey_color: String,
     folder_path: String,
     access_token: String,
-) -> Result<Vec<PhotoMetadata>, String> {
-    let supabase = SupabaseService::new().map_err(|e| e.to_string())?;
-    let autotagger = AutoTagger::new(supabase.clone()).map_err(|e| e.to_string())?;
-    
-    let results = autotagger.process_photo_folder(&user_id, &folder_path, &access_token).await
-        .map_err(|e| e.to_string())?;
-    
-    // Save photo metadata to database
-    for photo in &results {
-        supabase.save_photo_metadata(photo.clone(), &project_id, &access_token).await
-            .map_err(|e| e.to_string())?;
-    }
-    
-    Ok(results)
-}
+) -> Result<Vec<TagResult>, String> {
+    use tauri::Emitter;
 
-#[tauri::command]
-async fn get_all_players(user_id: String, access_token: String) -> Result<Vec<Player>, String> {
     let supabase = SupabaseService::new().map_err(|e| e.to_string())?;
-    supabase.get_all_players(&user_id, &access_token).await.map_err(|e| e.to_string())
-}
+    let autotagger = AutoTagger::new(supabase).map_err(|e| e.to_string())?;
 
-#[tauri::command]
-async fn get_project_photos(project_id: String, access_token: String) -> Result<Vec<PhotoMetadata>, String> {
-    let supabase = SupabaseService::new().map_err(|e| e.to_string())?;
-    supabase.get_photo_metadata(&project_id, &access_token).await.map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-async fn get_filter_options(user_id: String, access_token: String) -> Result<serde_json::Value, String> {
-    let supabase = SupabaseService::new().map_err(|e| e.to_string())?;
-    supabase.get_filter_options(&user_id, &access_token).await.map_err(|e| e.to_string())
+    autotagger
+        .process_photo_folder(&roster_id, &jersey_color, &folder_path, &access_token, |done, total, file_name| {
+            let _ = app.emit("tag-progress", serde_json::json!({ "done": done, "total": total, "fileName": file_name }));
+        })
+        .await
+        .map_err(|e| e.to_string())
 }
 
 // Keep the original greet command for testing
@@ -773,6 +575,9 @@ fn greet(name: &str) -> String {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // RUST_LOG=info surfaces the pipeline's progress/warning logs
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
@@ -799,10 +604,8 @@ pub fn run() {
             update_photo_metadata,
             // Autotagger commands
             parse_roster_from_pdf,
-            process_photo_folder,
-            get_all_players,
-            get_project_photos,
-            get_filter_options
+            list_rosters,
+            process_photo_folder
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

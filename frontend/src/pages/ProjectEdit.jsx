@@ -9,7 +9,6 @@ function ProjectEdit() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
-  const [uploadingRoster, setUploadingRoster] = useState(false)
   
   const { user, isDevelopment, getMockProject, accessToken } = useAuth()
 
@@ -17,11 +16,6 @@ function ProjectEdit() {
   const [metadataType, setMetadataType] = useState('description')
   const [informationType, setInformationType] = useState('player_name')
   
-  // Roster state
-  const [rosterFile, setRosterFile] = useState(null) // display name only
-  const [rosterSuccess, setRosterSuccess] = useState('')
-  const [rosterError, setRosterError] = useState('')
-
   useEffect(() => {
     if (id) {
       fetchProject()
@@ -119,43 +113,6 @@ function ProjectEdit() {
     }
   }
 
-  const handleRosterUpload = async () => {
-    setRosterError('')
-    setRosterSuccess('')
-    setUploadingRoster(true)
-
-    try {
-      const { invoke } = await import('@tauri-apps/api/core')
-
-      // Open native PDF file picker
-      let pdfPath
-      try {
-        pdfPath = await invoke('select_pdf_file')
-      } catch (_cancelled) {
-        setUploadingRoster(false)
-        return
-      }
-
-      setRosterFile(pdfPath.split(/[\\/]/).pop())
-
-      const result = await invoke('parse_roster_from_pdf', {
-        pdfPath,
-        projectId: project.id,
-        accessToken
-      })
-
-      if (result.success) {
-        setRosterSuccess(`✅ Parsed ${result.players.length} players from roster PDF`)
-      } else {
-        setRosterError(`Failed: ${result.error_message || 'Unknown error'}`)
-      }
-    } catch (error) {
-      setRosterError(`Error: ${error}`)
-    } finally {
-      setUploadingRoster(false)
-    }
-  }
-
   if (loading) {
     return (
       <div className="project-edit-container">
@@ -215,7 +172,7 @@ function ProjectEdit() {
         </button>
         <div className="project-title-section">
           <h1>Edit Project: {project.name}</h1>
-          <p>Configure metadata and upload roster</p>
+          <p>Configure metadata</p>
           {isDevelopment && (
             <div className="development-notice">
               🚧 Development Mode - Using Mock Data
@@ -259,48 +216,12 @@ function ProjectEdit() {
             </div>
           </div>
 
-          {/* Roster Upload Section — PDF only */}
+          {/* Rosters live on their own page */}
           <div className="edit-section">
-            <h2>📄 Upload Roster PDF</h2>
-            <p style={{ color: '#6b7280', marginBottom: '16px', fontSize: '0.95rem' }}>
-              Upload your team roster as a PDF. Gemini Vision AI will extract player names,
-              jersey numbers, positions and headshots automatically.
-            </p>
-            <div className="pdf-upload-area">
-              <div className="pdf-upload-icon">📄</div>
-              <div className="pdf-upload-info">
-                {rosterFile ? (
-                  <span className="pdf-selected-name">📎 {rosterFile}</span>
-                ) : (
-                  <span className="pdf-upload-hint">No PDF selected yet</span>
-                )}
-              </div>
-              <button
-                className="btn btn-primary pdf-upload-btn"
-                onClick={handleRosterUpload}
-                disabled={uploadingRoster}
-              >
-                {uploadingRoster ? (
-                  <><span className="btn-spinner" /> Parsing…</>
-                ) : (
-                  '📂 Upload & Parse PDF'
-                )}
-              </button>
-            </div>
-
-            {rosterError && (
-              <div className="error-message" style={{ marginTop: '12px' }}>
-                <span className="error-icon">⚠️</span>
-                <span>{rosterError}</span>
-                <button className="clear-btn" onClick={() => setRosterError('')}>✕</button>
-              </div>
-            )}
-            {rosterSuccess && (
-              <div className="success-message" style={{ marginTop: '12px' }}>
-                <span className="success-icon">✅</span>
-                <span>{rosterSuccess}</span>
-              </div>
-            )}
+            <h2>📄 Rosters</h2>
+            <button className="btn btn-primary" onClick={() => navigate('/rosters')}>
+              📋 Manage Rosters
+            </button>
           </div>
 
           {/* Project Actions - At the very bottom of the page */}

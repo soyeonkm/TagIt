@@ -7,6 +7,7 @@ import Profile from './pages/Profile'
 import Project from './pages/Project'
 import ProjectEdit from './pages/ProjectEdit'
 import CreateProject from './pages/CreateProject'
+import Rosters from './pages/Rosters'
 import ResetPassword from './pages/ResetPassword'
 import TauriRequired from './components/TauriRequired'
 import { AuthProvider } from './contexts/AuthContext'
@@ -34,6 +35,7 @@ function App() {
             <Route path="/project" element={<Project />} />
             <Route path="/project/:id" element={<Project />} />
             <Route path="/project/:id/edit" element={<ProjectEdit />} />
+            <Route path="/rosters" element={<Rosters />} />
             <Route path="/" element={<Home />} />
             <Route path="/login" element={<Login />} />
             <Route path="/profile" element={<Profile />} />

@@ -1,74 +1,98 @@
 use crate::error::AppError;
 use crate::supabase::SupabaseClient;
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use crate::{raw, xmp};
+use std::path::{Path, PathBuf};
 use std::fs;
-use image::{DynamicImage, GenericImageView};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 
-// ─── Core Player Struct ──────────────────────────────────────────────────────
+const GEMINI_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta/models";
+/// Tried in order. Individual models are often overloaded (503) or retired (404), so fall through.
+const GEMINI_MODELS: &[&str] = &["gemini-3.6-flash", "gemini-3.5-flash", "gemini-flash-latest"];
+/// Detections below this confidence are never written to a photo: naming the wrong
+/// player is worse than leaving a photo untagged.
+const MIN_CONFIDENCE: f64 = 75.0;
+
+// ─── Core Types ──────────────────────────────────────────────────────────────
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 #[serde(default)]
 pub struct Player {
     pub name: String,
-    pub jersey_number: Option<i32>,
-    pub position: Option<String>,
-    pub team: Option<String>,
-    pub image_url: Option<String>,
-    pub school_name: Option<String>,
-    pub sport_type: Option<String>,
-    pub season: Option<String>,
-    /// Base64-encoded face/headshot image extracted from the roster PDF
-    pub face_image_base64: Option<String>,
-    /// Textual description of the player's appearance, for later action-photo matching
-    pub face_descriptor: Option<String>,
+    /// Text, not an integer: "0" and "00" are different jerseys.
+    pub jersey_number: Option<String>,
 }
 
-// ─── Photo Metadata Types ────────────────────────────────────────────────────
-
+/// One uploaded roster PDF. `pdf_hash` (SHA-256 of the file) identifies duplicates.
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct DetectedFace {
-    pub x: i32,
-    pub y: i32,
-    pub width: i32,
-    pub height: i32,
-    pub confidence: f64,
+pub struct Roster {
+    pub id: String,
+    pub name: String,
+    pub file_name: String,
+    pub sport: String,
+    /// Always "YYYY-YYYY", e.g. "2026-2027"
+    pub season: String,
+    pub created_at: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct DetectedJerseyNumber {
-    pub x: i32,
-    pub y: i32,
-    pub width: i32,
-    pub height: i32,
+/// A jersey number Gemini saw, with how sure it is (0-100).
+#[derive(Debug, Serialize, Clone)]
+pub struct DetectedNumber {
     pub number: String,
     pub confidence: f64,
+    /// Worn by a player in our team's jersey color. Only these are ever tagged.
+    pub our_team: bool,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct PhotoMetadata {
-    pub file_path: String,
+/// Outcome of tagging one RAW photo.
+#[derive(Debug, Serialize, Clone)]
+pub struct TagResult {
     pub file_name: String,
-    pub file_size: u64,
-    pub width: u32,
-    pub height: u32,
-    pub detected_players: Vec<Player>,
-    pub detected_faces: Vec<DetectedFace>,
-    pub detected_jersey_numbers: Vec<DetectedJerseyNumber>,
+    pub file_path: String,
+    /// Every jersey number Gemini saw — including low-confidence ones and ones not on the roster
+    pub detected_numbers: Vec<DetectedNumber>,
+    pub matched_players: Vec<Player>,
+    /// Text added to the sidecar's description
     pub description: Option<String>,
+    /// False when nothing matched or the description already had this text
+    pub xmp_updated: bool,
+    pub error: Option<String>,
 }
-
-// ─── PDF Parsing Result ───────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ParsingResult {
+    /// True when this exact PDF was already uploaded; parsing was skipped.
+    pub duplicate: bool,
+    pub message: String,
+    pub roster: Option<Roster>,
     pub players: Vec<Player>,
-    pub parsing_method: String,
-    pub parsing_details: String,
-    pub player_count: usize,
-    pub success: bool,
-    pub error_message: Option<String>,
+}
+
+/// What Gemini extracted from a roster PDF, before it is saved.
+pub struct ParsedRoster {
+    pub sport: String,
+    pub season: String,
+    pub players: Vec<Player>,
+}
+
+/// Normalize a season to "YYYY-YYYY". Accepts "2026-2027", "2026–27", "2026/2027", "2026 - 2027".
+/// Returns None for anything that isn't two consecutive years (including a single year).
+pub fn normalize_season(raw: &str) -> Option<String> {
+    let parts: Vec<&str> = raw
+        .split(|c: char| !c.is_ascii_digit())
+        .filter(|s| !s.is_empty())
+        .collect();
+    let [start, end] = parts.as_slice() else { return None };
+    if start.len() != 4 {
+        return None;
+    }
+    let s: i32 = start.parse().ok()?;
+    let e: i32 = match end.len() {
+        4 => end.parse().ok()?,
+        2 if end.parse::<i32>().ok()? == (s + 1) % 100 => s + 1,
+        _ => return None,
+    };
+    (e == s + 1).then(|| format!("{}-{}", s, e))
 }
 
 // ─── AutoTagger ──────────────────────────────────────────────────────────────
@@ -76,599 +100,328 @@ pub struct ParsingResult {
 pub struct AutoTagger {
     supabase: SupabaseClient,
     gemini_api_key: Option<String>,
-    insightface_detector: Option<crate::insightface::FaceDetector>,
 }
 
 impl AutoTagger {
     pub fn new(supabase: SupabaseClient) -> Result<Self, AppError> {
         dotenv::dotenv().ok();
         let gemini_api_key = std::env::var("GEMINI_API_KEY").ok();
-
-        if gemini_api_key.is_some() {
-            log::info!("✅ Gemini API key loaded");
-        } else {
+        if gemini_api_key.is_none() {
             log::warn!("⚠️  GEMINI_API_KEY not set — PDF parsing will fail");
         }
-
-        let insightface_detector = crate::insightface::FaceDetector::new("models/buffalo_l/det_10g.onnx")
-            .map_err(|e| log::warn!("Failed to load InsightFace ONNX model: {:?}", e))
-            .ok();
-
-        Ok(Self {
-            supabase,
-            gemini_api_key,
-            insightface_detector,
-        })
+        Ok(Self { supabase, gemini_api_key })
     }
 
-    // ─── PDF Roster Parsing ───────────────────────────────────────────────────
-
-    /// Main entry point: parse a roster from a local PDF file path.
-    ///
-    /// Strategy:
-    /// 1. Extract raw text from the PDF using `pdf-extract`.
-    /// 2. Extract all embedded image bytes from the PDF using `lopdf`.
-    /// 3. Send both the extracted text AND the PDF as a base64 Vision payload
-    ///    to the Gemini API, asking it to return a structured JSON roster where
-    ///    each player entry includes appearance/face description.
-    /// 4. Try to match embedded images → players by page proximity so we can
-    ///    attach `face_image_base64` to each player.
-    pub async fn parse_roster_from_pdf(&self, pdf_path: &str) -> Result<ParsingResult, AppError> {
-        log::info!("📄 Starting PDF roster parsing: {}", pdf_path);
-
-        // ── Step 1: Read raw PDF bytes ──────────────────────────────────────
-        let pdf_bytes = fs::read(pdf_path)
-            .map_err(|e| AppError::Internal(format!("Failed to read PDF: {}", e)))?;
-
-        // ── Step 2: Extract plain text from PDF ────────────────────────────
-        let extracted_text = self.extract_pdf_text(&pdf_bytes);
-        log::info!("📝 PDF text extracted ({} chars)", extracted_text.len());
-
-        // ── Step 3: Extract embedded images from PDF ────────────────────────
-        let embedded_images = self.extract_pdf_images(&pdf_bytes);
-        log::info!("🖼️  Found {} embedded images in PDF", embedded_images.len());
-
-        // ── Step 4: Send to Gemini Vision API ──────────────────────────────
+    async fn call_gemini(&self, mime_type: &str, data: &[u8], prompt: &str) -> Result<String, AppError> {
         let api_key = self.gemini_api_key.as_deref().ok_or_else(|| {
             AppError::Internal("GEMINI_API_KEY is not set. Please add it to your .env file.".to_string())
         })?;
 
-        let pdf_b64 = BASE64.encode(&pdf_bytes);
-
-        match self.call_gemini_vision_pdf(api_key, &pdf_b64, &extracted_text).await {
-            Ok(mut players) => {
-                // ── Step 5: Attach embedded face images to matched players ──
-                if !embedded_images.is_empty() {
-                    self.attach_face_images_to_players(&mut players, &embedded_images);
-                }
-
-                let count = players.len();
-                log::info!("✅ PDF parsing complete: {} players found", count);
-
-                Ok(ParsingResult {
-                    players,
-                    parsing_method: "Gemini Vision PDF".to_string(),
-                    parsing_details: format!(
-                        "Extracted from PDF using Gemini Vision. {} embedded images found.",
-                        embedded_images.len()
-                    ),
-                    player_count: count,
-                    success: true,
-                    error_message: None,
-                })
-            }
-            Err(e) => {
-                log::error!("❌ Gemini Vision PDF parsing failed: {}", e);
-                Ok(ParsingResult {
-                    players: Vec::new(),
-                    parsing_method: "Gemini Vision PDF".to_string(),
-                    parsing_details: "Gemini Vision parsing failed".to_string(),
-                    player_count: 0,
-                    success: false,
-                    error_message: Some(e.to_string()),
-                })
-            }
-        }
-    }
-
-    /// Extract plain text from PDF bytes using the `pdf-extract` crate.
-    fn extract_pdf_text(&self, pdf_bytes: &[u8]) -> String {
-        match pdf_extract::extract_text_from_mem(pdf_bytes) {
-            Ok(text) => text,
-            Err(e) => {
-                log::warn!("pdf-extract failed ({}), continuing with empty text", e);
-                String::new()
-            }
-        }
-    }
-
-    /// Extract all embedded image XObjects from a PDF as raw bytes.
-    fn extract_pdf_images(&self, pdf_bytes: &[u8]) -> Vec<Vec<u8>> {
-        let mut images: Vec<Vec<u8>> = Vec::new();
-
-        let doc = match lopdf::Document::load_mem(pdf_bytes) {
-            Ok(d) => d,
-            Err(e) => {
-                log::warn!("lopdf failed to parse PDF for image extraction: {}", e);
-                return images;
-            }
-        };
-
-        for (_, page_id) in doc.get_pages() {
-            // get_page_resources returns (Option<&Dictionary>, Vec<ObjectId>)
-            let (resources_opt, _) = doc.get_page_resources(page_id);
-
-            let resources = match resources_opt {
-                Some(r) => r,
-                None => continue,
-            };
-
-            // Get the XObject sub-dictionary (may be inline or a reference)
-            let xobjects: lopdf::Dictionary = match resources.get(b"XObject") {
-                Ok(lopdf::Object::Dictionary(d)) => d.clone(),
-                Ok(lopdf::Object::Reference(id)) => match doc.get_object(*id) {
-                    Ok(lopdf::Object::Dictionary(d)) => d.clone(),
-                    _ => continue,
-                },
-                _ => continue,
-            };
-
-            for (_, xobj_val) in xobjects.iter() {
-                let xobj_id = match xobj_val {
-                    lopdf::Object::Reference(id) => *id,
-                    _ => continue,
-                };
-
-                let stream = match doc.get_object(xobj_id) {
-                    Ok(lopdf::Object::Stream(s)) => s,
-                    _ => continue,
-                };
-
-                // Only extract Image XObjects
-                let subtype_ok = match stream.dict.get(b"Subtype") {
-                    Ok(lopdf::Object::Name(n)) => n == b"Image",
-                    _ => false,
-                };
-                if !subtype_ok {
-                    continue;
-                }
-
-                let content = stream.decompressed_content().unwrap_or_else(|_| stream.content.clone());
-                if !content.is_empty() {
-                    images.push(content);
-                }
-            }
-        }
-
-        images
-    }
-
-
-
-    /// Call the Gemini Vision API with the PDF as inline base64 data.
-    /// Returns a Vec<Player> parsed from Gemini's JSON response.
-    async fn call_gemini_vision_pdf(
-        &self,
-        api_key: &str,
-        pdf_b64: &str,
-        extracted_text: &str,
-    ) -> Result<Vec<Player>, AppError> {
-        let url = format!(
-            "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key={}",
-            api_key
-        );
-
-        let prompt = format!(
-            r#"You are an expert sports roster data extractor. You are given a PDF roster document.
-
-Your task:
-1. Extract ALL players listed in the roster.
-2. For each player, determine:
-   - Full name
-   - Jersey number (integer, null if not present)
-   - Position (null if not listed)
-   - Sport type (e.g. "Basketball", "Football", "Soccer")
-   - Team classification: "university", "professional", "amateur", or "other"
-   - School name (if university team, otherwise null)
-   - Team name (if professional team, otherwise null)
-   - Season (string representing the season, e.g. "2023-2024" or "2024", null if not present)
-3. Only include actual players — NOT coaches, staff, or managers.
-
-Return ONLY valid JSON in exactly this format, no extra text:
-{{
-  "sport_type": "Basketball",
-  "team_classification": "university",
-  "school_name": "Michigan Wolverines",
-  "team_name": null,
-  "season": "2024-2025",
-  "players": [
-    {{
-      "name": "John Smith",
-      "jersey_number": 23,
-      "position": "Forward"
-    }},
-    {{
-      "name": "Mike Johnson",
-      "jersey_number": 11,
-      "position": "Guard"
-    }}
-  ]
-}}
-
-Supplementary extracted text from PDF (use as reference):
-{}
-"#,
-            &extracted_text[..extracted_text.len().min(8000)]
-        );
-
         let body = serde_json::json!({
             "contents": [{
                 "parts": [
-                    {
-                        "inline_data": {
-                            "mime_type": "application/pdf",
-                            "data": pdf_b64
-                        }
-                    },
-                    {
-                        "text": prompt
-                    }
+                    { "inline_data": { "mime_type": mime_type, "data": BASE64.encode(data) } },
+                    { "text": prompt }
                 ]
             }],
             "generationConfig": {
                 "temperature": 0.1,
-                "maxOutputTokens": 8192
-            }
-        });
-
-        let client = reqwest::Client::new();
-        let response = client
-            .post(&url)
-            .header("Content-Type", "application/json")
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| AppError::Internal(format!("Gemini API request failed: {}", e)))?;
-
-        if !response.status().is_success() {
-            let status = response.status();
-            let error_text = response.text().await.unwrap_or_default();
-            return Err(AppError::Internal(format!(
-                "Gemini API error {}: {}",
-                status, error_text
-            )));
-        }
-
-        let json: serde_json::Value = response
-            .json()
-            .await
-            .map_err(|e| AppError::Internal(format!("Failed to parse Gemini response: {}", e)))?;
-
-        // Extract text from Gemini response structure
-        let text = json["candidates"][0]["content"]["parts"][0]["text"]
-            .as_str()
-            .unwrap_or("");
-
-        self.parse_gemini_pdf_response(text)
-    }
-
-    /// Parse Gemini's JSON text response into a Vec<Player>.
-    fn parse_gemini_pdf_response(&self, response_text: &str) -> Result<Vec<Player>, AppError> {
-        // Strip markdown code fences if present
-        let cleaned = response_text
-            .trim()
-            .trim_start_matches("```json")
-            .trim_start_matches("```")
-            .trim_end_matches("```")
-            .trim();
-
-        let json_start = cleaned.find('{').ok_or_else(|| {
-            AppError::Internal(format!("No JSON object found in Gemini response: {}", &cleaned[..cleaned.len().min(200)]))
-        })?;
-        let json_end = cleaned.rfind('}').ok_or_else(|| {
-            AppError::Internal("Malformed JSON in Gemini response".to_string())
-        })?;
-
-        let json_str = &cleaned[json_start..=json_end];
-        let json: serde_json::Value = serde_json::from_str(json_str)
-            .map_err(|e| AppError::Internal(format!("JSON parse error: {} — snippet: {}", e, &json_str[..json_str.len().min(300)])))?;
-
-        let sport_type = json["sport_type"].as_str().map(|s| s.to_string());
-        let team_classification = json["team_classification"].as_str().map(|s| s.to_string());
-        let school_name = json["school_name"].as_str().map(|s| s.to_string());
-        let team_name = json["team_name"].as_str().map(|s| s.to_string());
-        let season = json["season"].as_str().map(|s| s.to_string())
-            .or_else(|| json["season"].as_i64().map(|n| n.to_string()));
-
-        let mut players = Vec::new();
-
-        if let Some(arr) = json["players"].as_array() {
-            for p in arr {
-                let name = match p["name"].as_str() {
-                    Some(n) if !n.is_empty() => n.to_string(),
-                    _ => continue,
-                };
-
-                let jersey_number = p["jersey_number"].as_i64().map(|n| n as i32)
-                    .or_else(|| p["jersey_number"].as_str().and_then(|s| s.parse().ok()));
-
-                let position = p["position"].as_str().map(|s| s.to_string());
-                let face_descriptor = p["face_descriptor"].as_str().map(|s| s.to_string());
-
-                // Determine team field (university → school name, professional → team name)
-                let team = match team_classification.as_deref() {
-                    Some("university") => school_name.clone(),
-                    Some("professional") => team_name.clone(),
-                    _ => school_name.clone().or_else(|| team_name.clone()),
-                };
-
-                players.push(Player {
-                    name,
-                    jersey_number,
-                    position,
-                    team,
-                    image_url: None,
-                    school_name: school_name.clone(),
-                    sport_type: sport_type.clone(),
-                    season: season.clone(),
-                    face_image_base64: None, // filled in by attach_face_images_to_players
-                    face_descriptor,
-                });
-            }
-        }
-
-        Ok(players)
-    }
-
-    /// Try to match extracted PDF images to players.
-    ///
-    /// If there is exactly one image per player (common in athletics PDFs), we
-    /// assign images to players in order. If counts differ, we still assign as
-    /// many as we can.
-    fn attach_face_images_to_players(
-        &self,
-        players: &mut Vec<Player>,
-        images: &[Vec<u8>],
-    ) {
-        for (i, player) in players.iter_mut().enumerate() {
-            if let Some(img_bytes) = images.get(i) {
-                // Validate it looks like an image (JPEG magic bytes FF D8 FF or PNG 89 50 4E 47)
-                let is_jpeg = img_bytes.starts_with(&[0xFF, 0xD8, 0xFF]);
-                let is_png  = img_bytes.starts_with(&[0x89, 0x50, 0x4E, 0x47]);
-                if is_jpeg || is_png {
-                    player.face_image_base64 = Some(BASE64.encode(img_bytes));
-                }
-            }
-        }
-    }
-
-    // ─── Photo Folder Processing ──────────────────────────────────────────────
-
-    /// Detect faces in a photo — placeholder using bounding box heuristic.
-    fn detect_faces(&self, _image: &DynamicImage) -> Result<Vec<DetectedFace>, AppError> {
-        // Real implementation would use InsightFace ONNX model.
-        // Returning empty vec for now; the insightface module handles this separately.
-        Ok(Vec::new())
-    }
-
-    /// Detect jersey numbers in a photo using Gemini Vision.
-    async fn detect_jersey_numbers(&self, image_bytes: &[u8], mime_type: &str) -> Result<Vec<DetectedJerseyNumber>, AppError> {
-        let api_key = match &self.gemini_api_key {
-            Some(key) => key,
-            None => {
-                log::warn!("GEMINI_API_KEY not set. Skipping jersey number detection.");
-                return Ok(Vec::new());
-            }
-        };
-
-        let url = format!(
-            "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key={}",
-            api_key
-        );
-
-        let img_b64 = BASE64.encode(image_bytes);
-
-        let prompt = "Identify all visible sports jersey numbers on the players in this image. Return ONLY a valid JSON array of strings representing the detected jersey numbers (e.g., [\"12\", \"5\", \"88\"]). Exclude random numbers, scoreboards, or other text. If no jersey numbers are clearly visible, return an empty array [].";
-
-        let body = serde_json::json!({
-            "contents": [{
-                "parts": [
-                    {
-                        "inline_data": {
-                            "mime_type": mime_type,
-                            "data": img_b64
-                        }
-                    },
-                    {
-                        "text": prompt
-                    }
-                ]
-            }],
-            "generationConfig": {
-                "temperature": 0.1,
+                "maxOutputTokens": 32768,
                 "responseMimeType": "application/json"
             }
         });
 
-        let client = reqwest::Client::new();
-        let response = client
-            .post(&url)
-            .header("Content-Type", "application/json")
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| AppError::Internal(format!("Gemini API request failed: {}", e)))?;
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(180))
+            .build()?;
+        let mut last_error = String::new();
 
-        if !response.status().is_success() {
-            let status = response.status();
-            let error_text = response.text().await.unwrap_or_default();
-            log::warn!("Gemini API error during jersey detection: {} - {}", status, error_text);
-            return Ok(Vec::new()); // Fallback to no detections on error
-        }
-
-        let resp_json: serde_json::Value = response.json().await
-            .map_err(|e| AppError::Internal(format!("Failed to parse Gemini response: {}", e)))?;
-
-        let text = resp_json["candidates"][0]["content"]["parts"][0]["text"]
-            .as_str()
-            .unwrap_or("[]");
-
-        let numbers: Vec<String> = match serde_json::from_str(text) {
-            Ok(nums) => nums,
-            Err(e) => {
-                log::warn!("Failed to parse JSON from Gemini: {}", e);
-                Vec::new()
+        for round in 0..3u64 {
+            if round > 0 {
+                tokio::time::sleep(std::time::Duration::from_secs(15 * round)).await;
             }
-        };
-
-        let detected = numbers.into_iter().map(|number| DetectedJerseyNumber {
-            x: 0,
-            y: 0,
-            width: 0,
-            height: 0,
-            number,
-            confidence: 1.0,
-        }).collect();
-
-        Ok(detected)
-    }
-
-    /// Process a folder of photos and tag them automatically
-    pub async fn process_photo_folder(
-        &self,
-        user_id: &str,
-        folder_path: &str,
-        access_token: &str,
-    ) -> Result<Vec<PhotoMetadata>, AppError> {
-        let mut photo_metadata = Vec::new();
-
-        let image_extensions = ["jpg", "jpeg", "png", "bmp", "tiff", "webp"];
-        let entries = fs::read_dir(folder_path)?;
-
-        for entry in entries {
-            let entry = entry?;
-            let path = entry.path();
-            if let Some(extension) = path.extension() {
-                if let Some(ext_str) = extension.to_str() {
-                    if image_extensions.contains(&ext_str.to_lowercase().as_str()) {
-                        if let Ok(metadata) = self.process_single_photo(user_id, &path, access_token).await {
-                            photo_metadata.push(metadata);
-                        }
+            for model in GEMINI_MODELS {
+                let url = format!("{}/{}:generateContent?key={}", GEMINI_BASE_URL, model, api_key);
+                let response = match client.post(&url).json(&body).send().await {
+                    Ok(r) => r,
+                    Err(e) => {
+                        // Don't log `e` with the URL: it contains the API key
+                        last_error = format!("{}: request failed ({})", model, if e.is_timeout() { "timed out" } else { "network error" });
+                        continue;
                     }
+                };
+
+                let status = response.status();
+                if status.is_success() {
+                    if !last_error.is_empty() {
+                        log::info!("Gemini: {} succeeded after earlier failures", model);
+                    }
+                    let json: serde_json::Value = response.json().await?;
+                    let candidate = &json["candidates"][0];
+                    return match candidate["content"]["parts"].as_array()
+                        .and_then(|parts| parts.iter().filter_map(|p| p["text"].as_str()).last())
+                    {
+                        Some(text) => Ok(text.to_string()),
+                        None => Err(AppError::Internal(format!(
+                            "Gemini ({}) returned no text (finishReason: {})",
+                            model, candidate["finishReason"].as_str().unwrap_or("unknown")
+                        ))),
+                    };
                 }
+
+                let error_text = response.text().await.unwrap_or_default();
+                last_error = format!("{} returned {}: {}", model, status, error_text.chars().take(1200).collect::<String>());
+                // Bad request / bad key won't be fixed by another model
+                if !matches!(status.as_u16(), 404 | 429 | 500 | 502 | 503 | 504) {
+                    return Err(AppError::Internal(format!("Gemini API error — {}", last_error)));
+                }
+                log::warn!("Gemini fallback: {}", last_error);
             }
         }
 
-        Ok(photo_metadata)
+        Err(AppError::Internal(format!("All Gemini models are unavailable right now. Last error — {}", last_error)))
     }
 
-    /// Process a single photo and extract metadata
-    async fn process_single_photo(
-        &self,
-        user_id: &str,
-        file_path: &Path,
-        access_token: &str,
-    ) -> Result<PhotoMetadata, AppError> {
-        let image = image::open(file_path)?;
-        let (width, height) = image.dimensions();
+    // ─── PDF Roster Parsing ───────────────────────────────────────────────────
 
-        let metadata = fs::metadata(file_path)?;
-        let file_size = metadata.len();
-        let file_name = file_path.file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("unknown")
+    /// Send the roster PDF to Gemini and extract sport, season and players.
+    pub async fn parse_roster_pdf(&self, pdf_bytes: &[u8]) -> Result<ParsedRoster, AppError> {
+        let prompt = r#"You are a sports roster data extractor. You are given a roster PDF.
+
+Extract:
+- "sport": the sport, prefixed with "Men's" or "Women's" when the roster says so (e.g. "Men's Basketball", "Football", "Women's Soccer").
+- "season": the season as two consecutive years joined by a hyphen, exactly "YYYY-YYYY" (e.g. "2026-2027").
+  Convert other forms ("2026-27", "2026/2027") to this format. If only one year is shown, return the
+  season that year belongs to (e.g. a fall sport in "2026" is "2026-2027", a spring sport in "2026" is "2025-2026").
+  Use null only if no year appears anywhere.
+- "players": every player. Only players — NOT coaches, staff, or managers.
+  For each: "name" (full name) and "jersey_number" (a string exactly as printed, e.g. "00", "7"; null if none).
+
+Return ONLY JSON in this format:
+{"sport": "Basketball", "season": "2026-2027", "players": [{"name": "John Smith", "jersey_number": "23"}]}"#;
+
+        let text = self.call_gemini("application/pdf", pdf_bytes, prompt).await?;
+        let json: serde_json::Value = serde_json::from_str(text.trim())
+            .map_err(|e| AppError::Internal(format!("Could not read Gemini's response: {} — {}", e, text.chars().take(300).collect::<String>())))?;
+
+        let sport = json["sport"].as_str().map(str::trim).filter(|s| !s.is_empty())
+            .ok_or_else(|| AppError::InvalidInput("Couldn't determine the sport from this roster PDF.".to_string()))?
             .to_string();
 
-        let image_bytes = fs::read(file_path)?;
-        let mime_type = match file_path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase().as_str() {
-            "png" => "image/png",
-            "webp" => "image/webp",
-            "heic" => "image/heic",
-            "heif" => "image/heif",
-            _ => "image/jpeg",
-        };
+        let raw_season = json["season"].as_str().unwrap_or("");
+        let season = normalize_season(raw_season).ok_or_else(|| AppError::InvalidInput(format!(
+            "Couldn't find the season as a year range (e.g. 2026-2027) in this roster PDF (got {:?}).", raw_season
+        )))?;
 
-        let detected_faces = self.detect_faces(&image)?;
-        let detected_jersey_numbers = self.detect_jersey_numbers(&image_bytes, mime_type).await?;
-
-        let detected_players = self.match_players_with_detections(
-            user_id,
-            &detected_faces,
-            &detected_jersey_numbers,
-            access_token,
-        ).await?;
-
-        let description = self.generate_photo_description(&detected_players);
-
-        Ok(PhotoMetadata {
-            file_path: file_path.to_string_lossy().to_string(),
-            file_name,
-            file_size,
-            width,
-            height,
-            detected_players,
-            detected_faces,
-            detected_jersey_numbers,
-            description,
-        })
-    }
-
-    /// Match detected faces and jersey numbers with players in the database
-    async fn match_players_with_detections(
-        &self,
-        user_id: &str,
-        faces: &[DetectedFace],
-        jersey_numbers: &[DetectedJerseyNumber],
-        access_token: &str,
-    ) -> Result<Vec<Player>, AppError> {
-        let players = self.supabase.get_all_players(user_id, access_token).await?;
-        let mut matched_players = Vec::new();
-
-        // Match by jersey number first (most reliable)
-        for jersey_detection in jersey_numbers {
-            if let Some(player) = players.iter().find(|p| {
-                p.jersey_number.map(|num| num.to_string() == jersey_detection.number).unwrap_or(false)
-            }) {
-                matched_players.push(player.clone());
-            }
-        }
-
-        // If faces detected but no jersey matches, mark as unknown
-        if matched_players.is_empty() && !faces.is_empty() {
-            matched_players.push(Player {
-                name: "Unknown Player".to_string(),
-                jersey_number: None,
-                position: None,
-                team: None,
-                image_url: None,
-                school_name: None,
-                sport_type: None,
-                season: None,
-                face_image_base64: None,
-                face_descriptor: None,
-            });
-        }
-
-        Ok(matched_players)
-    }
-
-    /// Generate a description for the photo based on detected players
-    fn generate_photo_description(&self, players: &[Player]) -> Option<String> {
-        if players.is_empty() {
-            return None;
-        }
-
-        let player_names: Vec<String> = players
-            .iter()
-            .map(|p| {
-                if let Some(num) = p.jersey_number {
-                    format!("{} (#{})", p.name, num)
-                } else {
-                    p.name.clone()
+        let players: Vec<Player> = json["players"].as_array().into_iter().flatten()
+            .filter_map(|p| {
+                let name = p["name"].as_str()?.trim();
+                if name.is_empty() {
+                    return None;
                 }
+                let jersey_number = p["jersey_number"].as_str().map(|s| s.trim().trim_start_matches('#').to_string())
+                    .or_else(|| p["jersey_number"].as_i64().map(|n| n.to_string()))
+                    .filter(|s| !s.is_empty());
+                Some(Player { name: name.to_string(), jersey_number })
             })
             .collect();
 
-        Some(format!("Players: {}", player_names.join(", ")))
+        if players.is_empty() {
+            return Err(AppError::InvalidInput("No players found in this roster PDF.".to_string()));
+        }
+
+        Ok(ParsedRoster { sport, season, players })
+    }
+
+    // ─── Photo Folder Processing ──────────────────────────────────────────────
+
+    /// Jersey numbers visible in a JPEG, as printed (e.g. "00"), each with a confidence.
+    async fn detect_jersey_numbers(&self, jpeg: &[u8], jersey_color: &str) -> Result<Vec<DetectedNumber>, AppError> {
+        let prompt = format!(r#"Identify the jersey numbers worn by players in this image.
+
+Our team wears: "{jersey_color}". Other players (opponents, referees) wear different colors.
+
+For each one return an object: {{"number": "42", "confidence": 88, "our_team": true}}
+- "number": the digits exactly as printed on the jersey ("00" and "0" are different numbers).
+- "confidence": 0-100, how certain you are that you read every digit correctly AND that it is a
+  player's jersey number — not a scoreboard, clock, banner, advertisement, or logo.
+- "our_team": true ONLY if that number is on a jersey matching our team's colors above. false for
+  any other jersey color, or when you cannot tell whose jersey it is.
+
+Be strict and conservative. Give a LOW confidence (under 75) when digits are partly hidden, blurry,
+cut off, seen at a steep angle, or when you are guessing between similar digits (3/8, 5/6, 0/8).
+Only give a high confidence when the full number is clearly legible. Never guess a number to be helpful.
+
+Return ONLY a JSON array, e.g. [{{"number": "42", "confidence": 88, "our_team": true}}]. If none are visible, return []."#);
+
+        let text = self.call_gemini("image/jpeg", jpeg, &prompt).await?;
+        let json: serde_json::Value = serde_json::from_str(text.trim())
+            .map_err(|e| AppError::Internal(format!("Could not read Gemini's response: {}", e)))?;
+
+        let mut numbers: Vec<DetectedNumber> = json.as_array().into_iter().flatten()
+            .filter_map(|v| {
+                let number = v["number"].as_str().map(|s| s.trim().trim_start_matches('#').to_string())
+                    .or_else(|| v["number"].as_i64().map(|n| n.to_string()))
+                    .filter(|s| !s.is_empty())?;
+                // A detection without a confidence is treated as unusable rather than certain
+                let confidence = v["confidence"].as_f64().unwrap_or(0.0).clamp(0.0, 100.0);
+                // Unknown team counts as not ours, so opponents are never tagged by accident
+                let our_team = v["our_team"].as_bool().unwrap_or(false);
+                Some(DetectedNumber { number, confidence, our_team })
+            })
+            .collect();
+
+        // Same number seen twice on the same team: keep the most confident reading.
+        // Both teams can wear the same number, so those stay separate.
+        numbers.sort_by(|a, b| a.number.cmp(&b.number).then(b.our_team.cmp(&a.our_team)).then(b.confidence.total_cmp(&a.confidence)));
+        numbers.dedup_by(|a, b| a.number == b.number && a.our_team == b.our_team);
+        Ok(numbers)
+    }
+
+    /// Tag every RAW photo in a folder (not subfolders) against one roster.
+    /// JPEGs and other non-RAW files are skipped. `on_progress(done, total, file_name)` fires before each photo.
+    pub async fn process_photo_folder(
+        &self,
+        roster_id: &str,
+        jersey_color: &str,
+        folder_path: &str,
+        access_token: &str,
+        on_progress: impl Fn(usize, usize, &str),
+    ) -> Result<Vec<TagResult>, AppError> {
+        if self.gemini_api_key.is_none() {
+            return Err(AppError::Internal("GEMINI_API_KEY is not set. Please add it to your .env file.".to_string()));
+        }
+
+        let jersey_color = jersey_color.trim();
+        if jersey_color.is_empty() {
+            return Err(AppError::InvalidInput("Enter your team's jersey color.".to_string()));
+        }
+
+        let roster = self.supabase.get_roster_players(roster_id, access_token).await?;
+        if roster.is_empty() {
+            return Err(AppError::InvalidInput("The selected roster has no players.".to_string()));
+        }
+
+        let mut photos: Vec<PathBuf> = fs::read_dir(folder_path)?
+            .filter_map(|entry| entry.ok().map(|e| e.path()))
+            .filter(|p| p.is_file() && raw::is_raw(p))
+            .collect();
+        photos.sort();
+        if photos.is_empty() {
+            return Err(AppError::InvalidInput("No RAW photos found in this folder (JPEGs are not tagged).".to_string()));
+        }
+
+        let mut results = Vec::with_capacity(photos.len());
+        for (i, path) in photos.iter().enumerate() {
+            let file_name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+            on_progress(i, photos.len(), &file_name);
+
+            let mut result = TagResult {
+                file_name,
+                file_path: path.to_string_lossy().to_string(),
+                detected_numbers: Vec::new(),
+                matched_players: Vec::new(),
+                description: None,
+                xmp_updated: false,
+                error: None,
+            };
+            if let Err(e) = self.tag_photo(&roster, jersey_color, path, &mut result).await {
+                log::warn!("Failed to tag {}: {}", result.file_name, e);
+                result.error = Some(e.to_string());
+            }
+            results.push(result);
+        }
+        on_progress(photos.len(), photos.len(), "");
+
+        Ok(results)
+    }
+
+    async fn tag_photo(&self, roster: &[Player], jersey_color: &str, path: &Path, result: &mut TagResult) -> Result<(), AppError> {
+        let jpeg = gemini_jpeg(raw::preview_image(path).map_err(AppError::Internal)?)?;
+
+        result.detected_numbers = self.detect_jersey_numbers(&jpeg, jersey_color).await?;
+        result.matched_players = match_players(roster, &result.detected_numbers);
+        result.description = generate_photo_description(&result.matched_players);
+
+        if let Some(description) = &result.description {
+            result.xmp_updated = xmp::append_description_file(&xmp::sidecar_path(path), description)
+                .map_err(AppError::Internal)?;
+        }
+        Ok(())
     }
 }
+
+/// Re-encode as a JPEG no larger than 2048px on the long edge: plenty for jersey numbers,
+/// and keeps requests far below Gemini's inline size limit.
+fn gemini_jpeg(img: image::DynamicImage) -> Result<Vec<u8>, AppError> {
+    const MAX_DIM: u32 = 2048;
+    let img = if img.width().max(img.height()) > MAX_DIM {
+        img.resize(MAX_DIM, MAX_DIM, image::imageops::FilterType::Triangle)
+    } else {
+        img
+    };
+    let mut buf = Vec::new();
+    image::DynamicImage::ImageRgb8(img.to_rgb8())
+        .write_to(&mut std::io::Cursor::new(&mut buf), image::ImageOutputFormat::Jpeg(85))?;
+    Ok(buf)
+}
+
+/// Roster players whose number was seen on our team's jersey, confidently enough to tag.
+fn match_players(roster: &[Player], numbers: &[DetectedNumber]) -> Vec<Player> {
+    numbers
+        .iter()
+        .filter(|d| d.our_team && d.confidence >= MIN_CONFIDENCE)
+        .filter_map(|d| roster.iter().find(|p| p.jersey_number.as_deref() == Some(d.number.as_str())))
+        .cloned()
+        .collect()
+}
+
+fn generate_photo_description(players: &[Player]) -> Option<String> {
+    if players.is_empty() {
+        return None;
+    }
+    let names: Vec<String> = players
+        .iter()
+        .map(|p| match &p.jersey_number {
+            Some(num) => format!("{} (#{})", p.name, num),
+            None => p.name.clone(),
+        })
+        .collect();
+    Some(format!("Players: {}", names.join(", ")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn season_normalization() {
+        assert_eq!(normalize_season("2026-2027").as_deref(), Some("2026-2027"));
+        assert_eq!(normalize_season("2026–27").as_deref(), Some("2026-2027"));
+        assert_eq!(normalize_season("2026 / 2027").as_deref(), Some("2026-2027"));
+        assert_eq!(normalize_season("1999-00").as_deref(), Some("1999-2000"));
+        assert_eq!(normalize_season("2026"), None);
+        assert_eq!(normalize_season("2026-2028"), None);
+        assert_eq!(normalize_season("2026-28"), None);
+        assert_eq!(normalize_season(""), None);
+    }
+
+    #[test]
+    fn matches_only_roster_numbers() {
+        let roster = vec![
+            Player { name: "A".into(), jersey_number: Some("0".into()) },
+            Player { name: "B".into(), jersey_number: Some("00".into()) },
+        ];
+        let det = |n: &str, c: f64| DetectedNumber { number: n.into(), confidence: c, our_team: true };
+        let matched = match_players(&roster, &[det("00", 90.0), det("99", 99.0)]);
+        assert_eq!(generate_photo_description(&matched).as_deref(), Some("Players: B (#00)"));
+        // Anything under 75% confidence is discarded, even when it is on the roster
+        assert!(match_players(&roster, &[det("0", 74.9), det("00", 0.0)]).is_empty());
+        assert_eq!(match_players(&roster, &[det("0", 75.0)]).len(), 1);
+        // A roster number on the other team's jersey is never tagged
+        let opponent = DetectedNumber { number: "0".into(), confidence: 99.0, our_team: false };
+        assert!(match_players(&roster, &[opponent]).is_empty());
+    }
+}
+
+
