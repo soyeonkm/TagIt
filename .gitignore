@@ -247,3 +247,6 @@ build/
 
 *.onnx
 models/
+
+# Vite cache
+.vite/

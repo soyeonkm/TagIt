@@ -567,12 +567,6 @@ async fn process_photo_folder(
         .map_err(|e| e.to_string())
 }
 
-// Keep the original greet command for testing
-#[tauri::command]
-fn greet(name: &str) -> String {
-    format!("Hello, {}! You've been greeted from Rust!", name)
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // RUST_LOG=info surfaces the pipeline's progress/warning logs
@@ -581,7 +575,6 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
-            greet,
             sign_up,
             sign_in,
             get_user,
